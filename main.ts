@@ -1,4 +1,4 @@
-import OGIAddon, { SearchTool } from "ogi-addon";
+import OGIAddon, { SearchTool, type BasicLibraryInfo, type SearchResult } from "ogi-addon";
 import { join } from "path";
 import fs from "fs";
 import axios from "axios";
@@ -152,6 +152,84 @@ addon.on('game-details', (appID, event) => {
       });
     }
     event.fail('Game not found');
+  });
+});
+
+function extractApps(items: { name: string; logo: string }[]): BasicLibraryInfo[] {
+  return items.map(item => {
+    const match = item.logo.match(/apps\/(\d+)/);
+    if (!match) {
+      return null;
+    }
+    const appID = parseInt(match[1]);
+    return {
+      name: item.name,
+      capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${appID}/library_600x900_2x.jpg`,
+      appID: appID,
+      storefront: 'steam'
+    }
+  }).filter(app => app !== null);
+}
+
+type SteamResult = {
+  desc: string;
+  items: {
+    name: string;
+    logo: string
+  }[]
+}
+
+addon.on('catalog', (event) => {
+  event.defer(async () => {
+    // search for global top sellers not f2p and a game
+    const promises = await Promise.allSettled([
+      // -- Top Sellers --
+      new Promise(async (resolve) => {
+        const topSellers = await axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998`, {
+          headers: {
+            'User-Agent': 'OGI Steam-Integration/1.0.0'
+          }
+        }); 
+
+        resolve([ 'top-sellers', 'Top Sellers', 'The best selling games on Steam', extractApps(topSellers.data.items) ]);
+      }),
+      // -- Roguelike --
+      new Promise(async (resolve) => {
+        const roguelike = await axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&tags=1716`, {
+          headers: {
+            'User-Agent': 'OGI Steam-Integration/1.0.0'
+          },
+        }); 
+
+        resolve([ 'roguelike', 'Roguelike', 'Top Roguelike games on Steam', extractApps(roguelike.data.items) ]);
+      }),
+      // -- JRPGs --
+      new Promise(async (resolve) => {
+        const jrpg = await axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&tags=4434`, {
+          headers: {
+            'User-Agent': 'OGI Steam-Integration/1.0.0'
+          },
+        }); 
+
+        resolve([ 'jrpg', 'JRPG', 'Top JRPG games on Steam', extractApps(jrpg.data.items) ]);
+      }),
+      // --
+    ]);
+    // filter out the promises that are not fulfilled
+    const fulfilledPromises = promises.filter(promise => promise.status === 'fulfilled');
+    // get the results from the fulfilled promises
+
+    // first is the key, second is the name, third is the description, fourth is the listings
+    const results = fulfilledPromises.map(promise => promise.value as [string, string, string, BasicLibraryInfo[]]);
+    const catalogResults: Parameters<typeof event.resolve>[0] = {};
+    for (const result of results) {
+      catalogResults[result[0]] = {
+        name: result[1],
+        description: result[2],
+        listings: result[3]
+      };
+    }
+    event.resolve(catalogResults);
   });
 });
 
