@@ -134,7 +134,7 @@ addon.on('library-search', (query, event) => {
   });
 });
 
-addon.on('game-details', (appID, event) => {
+addon.on('game-details', ({ appID, storefront }, event) => {
   event.defer(async () => {
     const realGame = await getRealGame(appID);
     if (realGame) {
