@@ -10,7 +10,7 @@ const addon = new OGIAddon({
   id: 'steam-integration',
   author: 'OGI Team',
   description: 'An addon to integrate Steam store links into OpenGameInstaller',
-  repository: 'https://github.com/Nat3z/ogi-steam',
+  repository: 'https://github.com/Nat3z/steam-integration',
   storefronts: ['steam']
 });
 
@@ -25,35 +25,39 @@ function extractSimpleName(input: string) {
 async function getRealGame(titleId: number): Promise<GameData | undefined> {
   // Add delay to prevent rate limiting
   await new Promise((resolve) => setTimeout(resolve, 200));
+  try {
+    const response = await axios({
+      method: 'GET',
+      url: `https://store.steampowered.com/api/appdetails?appids=${titleId}&cc=us`,
+    });
+    if (!response.data[titleId].success) {
+      return undefined;
+    }
+    if (response.data[titleId].data.type === 'game') {
+      return response.data[titleId].data;
+    }
 
-  const response = await axios({
-    method: 'GET',
-    url: `https://store.steampowered.com/api/appdetails?appids=${titleId}&cc=us`,
-  });
-  if (!response.data[titleId].success) {
+    // if (
+    //   response.data[titleId].data.type === 'dlc' ||
+    //   response.data[titleId].data.type === 'dlc_sub' ||
+    //   response.data[titleId].data.type === 'music' ||
+    //   response.data[titleId].data.type === 'video' ||
+    //   response.data[titleId].data.type === 'episode'
+    // ) {
+    //   if (!response.data[titleId].data.fullgame) {
+    //     return undefined;
+    //   }
+    //   return response.data[titleId].data.fullgame;
+    // }
+    // if (response.data[titleId].data.type === 'demo') {
+    //   return response.data[titleId].data.fullgame;
+    // }
+
+    return undefined;
+  } catch (e) {
+    console.error(e);
     return undefined;
   }
-  if (response.data[titleId].data.type === 'game') {
-    return response.data[titleId].data;
-  }
-
-  // if (
-  //   response.data[titleId].data.type === 'dlc' ||
-  //   response.data[titleId].data.type === 'dlc_sub' ||
-  //   response.data[titleId].data.type === 'music' ||
-  //   response.data[titleId].data.type === 'video' ||
-  //   response.data[titleId].data.type === 'episode'
-  // ) {
-  //   if (!response.data[titleId].data.fullgame) {
-  //     return undefined;
-  //   }
-  //   return response.data[titleId].data.fullgame;
-  // }
-  // if (response.data[titleId].data.type === 'demo') {
-  //   return response.data[titleId].data.fullgame;
-  // }
-
-  return undefined;
 }
 
 const steamAppSearcher = new SearchTool<{ appid: number; name: string }>([], ['appid', 'name'], {
@@ -184,34 +188,35 @@ addon.on('catalog', (event) => {
     // search for global top sellers not f2p and a game
     const promises = await Promise.allSettled([
       // -- Top Sellers --
-      new Promise(async (resolve) => {
-        const topSellers = await axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998`, {
+      new Promise(async (resolve, reject) => {
+        axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998`, {
           headers: {
             'User-Agent': 'OGI Steam-Integration/1.0.0'
           }
-        }); 
+        }).then(data => 
+          resolve([ 'top-sellers', 'Top Sellers', 'The best selling games on Steam', extractApps(data.data.items) ])
+        ).catch(d => reject(d))
 
-        resolve([ 'top-sellers', 'Top Sellers', 'The best selling games on Steam', extractApps(topSellers.data.items) ]);
       }),
       // -- Roguelike --
-      new Promise(async (resolve) => {
-        const roguelike = await axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&tags=1716`, {
+      new Promise(async (resolve, reject) => {
+        axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&tags=1716`, {
           headers: {
             'User-Agent': 'OGI Steam-Integration/1.0.0'
           },
-        }); 
-
-        resolve([ 'roguelike', 'Roguelike', 'Top Roguelike games on Steam', extractApps(roguelike.data.items) ]);
+        }).then(data =>
+          resolve([ 'roguelike', 'Roguelike', 'Top Roguelike games on Steam', extractApps(data.data.items) ])
+        ).catch(d => reject(d))
       }),
       // -- JRPGs --
-      new Promise(async (resolve) => {
-        const jrpg = await axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&tags=4434`, {
+      new Promise(async (resolve, reject) => {
+        axios<SteamResult>(`https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&tags=4434`, {
           headers: {
             'User-Agent': 'OGI Steam-Integration/1.0.0'
           },
-        }); 
-
-        resolve([ 'jrpg', 'JRPG', 'Top JRPG games on Steam', extractApps(jrpg.data.items) ]);
+        }).then(data =>
+          resolve([ 'jrpg', 'JRPG', 'Top JRPG games on Steam', extractApps(data.data.items) ])
+        ).catch(d => reject(d))
       }),
       // --
     ]);
