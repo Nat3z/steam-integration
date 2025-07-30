@@ -1,4 +1,4 @@
-import OGIAddon, { SearchTool, type BasicLibraryInfo, type SearchResult } from "ogi-addon";
+import OGIAddon, { CustomTask, SearchTool, type BasicLibraryInfo, type SearchResult } from "ogi-addon";
 import { join } from "path";
 import fs from "fs";
 import axios from "axios";
@@ -14,12 +14,96 @@ const addon = new OGIAddon({
   storefronts: ['steam']
 });
 
+function stringSimilarity(a: string, b: string): number {
+  // Normalize and clean the strings
+  const normalize = (str: string): string => {
+    return str
+      .toLowerCase() 
+      // Remove year patterns like (2023), [2024], etc.
+      .replace(/[\(\[\{]\d{4}[\)\]\}]/g, '')
+      // Remove edition suffixes but keep them for partial matching
+      .replace(/\s+(premium|deluxe|gold|ultimate|complete|goty|game\s+of\s+the\s+year|enhanced|definitive|remastered|directors?\s+cut)\s+(edition)?/gi, '')
+      // Clean up extra whitespace
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
 
-function extractSimpleName(input: string) {
-  // Regular expression to match the game name
-  const regex = /^(.+?)([:\-–])/;
-  const match = input.match(regex);
-  return match ? match[1].trim() : null;
+  const cleanA = normalize(a);
+  const cleanB = normalize(b);
+
+  // Return early for exact equality after normalization
+  if (cleanA === cleanB) return 1;
+
+  // Split into words for word-level matching
+  const wordsA = cleanA.split(/\s+/).filter(word => word.length > 0);
+  const wordsB = cleanB.split(/\s+/).filter(word => word.length > 0);
+
+  if (wordsA.length === 0 || wordsB.length === 0) return 0;
+
+  // Calculate word-level similarity
+  let exactMatches = 0;
+  let partialMatches = 0;
+  const usedWordsB = new Set<number>();
+
+  for (const wordA of wordsA) {
+    let bestMatch = 0;
+    let bestMatchIndex = -1;
+
+    for (let i = 0; i < wordsB.length; i++) {
+      if (usedWordsB.has(i)) continue;
+
+      const wordB = wordsB[i];
+      
+      // Exact word match
+      if (wordA === wordB) {
+        exactMatches++;
+        usedWordsB.add(i);
+        bestMatchIndex = i;
+        break;
+      }
+
+      // Partial word match using character overlap
+      const overlap = calculateCharacterOverlap(wordA, wordB);
+      if (overlap > bestMatch && overlap > 0.6) {
+        bestMatch = overlap;
+        bestMatchIndex = i;
+      }
+    }
+
+    // If we found a good partial match and haven't used exact match
+    if (bestMatchIndex !== -1 && !usedWordsB.has(bestMatchIndex) && bestMatch > 0) {
+      partialMatches++;
+      usedWordsB.add(bestMatchIndex);
+    }
+  }
+
+  // Calculate similarity score
+  // Give more weight to exact matches, some weight to partial matches
+  const totalWords = Math.max(wordsA.length, wordsB.length);
+  const exactScore = exactMatches / totalWords;
+  const partialScore = (partialMatches * 0.7) / totalWords;
+  
+  return Math.min(1, exactScore + partialScore);
+
+  function calculateCharacterOverlap(str1: string, str2: string): number {
+    if (str1.length < 2 || str2.length < 2) return str1 === str2 ? 1 : 0;
+    
+    const bigrams1 = new Set<string>();
+    const bigrams2 = new Set<string>();
+    
+    for (let i = 0; i < str1.length - 1; i++) {
+      bigrams1.add(str1.substring(i, i + 2));
+    }
+    
+    for (let i = 0; i < str2.length - 1; i++) {
+      bigrams2.add(str2.substring(i, i + 2));
+    }
+    
+    const intersection = [...bigrams1].filter(bg => bigrams2.has(bg)).length;
+    const union = bigrams1.size + bigrams2.size - intersection;
+    
+    return union > 0 ? intersection / union : 0;
+  }
 }
 
 async function getRealGame(titleId: number): Promise<GameData | undefined> {
@@ -65,7 +149,7 @@ const steamAppSearcher = new SearchTool<{ appid: number; name: string }>([], ['a
   includeScore: true
 });
 
-export async function getSteamApps() {
+export async function getSteamApps(task: CustomTask) {
   if (fs.existsSync(join(__dirname, 'steam-apps.json'))) {
     const steamApps: {
       timeSinceUpdate: number;
@@ -79,15 +163,20 @@ export async function getSteamApps() {
       return;
     }
   }
-  const response = await axios.get(
-    'https://api.steampowered.com/ISteamApps/GetAppList/v0002/?key=STEAMKEY&format=json'
-  );
-  const steamApps = response.data.applist.apps;
-  fs.writeFileSync(
-    join(__dirname, 'steam-apps.json'),
-    JSON.stringify({ timeSinceUpdate: Date.now(), data: steamApps }, null, 2)
-  );
-  steamAppSearcher.addItems(steamApps);
+  task.log('Downloading Steam apps');
+  try {
+    const response = await axios.get(
+      'https://api.steampowered.com/ISteamApps/GetAppList/v0002/?key=STEAMKEY&format=json'
+    );
+    const steamApps = response.data.applist.apps;
+    fs.writeFileSync(
+      join(__dirname, 'steam-apps.json'),
+      JSON.stringify({ timeSinceUpdate: Date.now(), data: steamApps }, null, 2)
+    );
+    steamAppSearcher.addItems(steamApps); 
+  } catch (e) {
+    task.fail('Failed to download Steam apps');
+  }
 }
 
 addon.on('configure', (config) => config.addNumberOption(option => 
@@ -106,35 +195,48 @@ addon.on('connect', async () => {
   const task = await addon.task();
   // going to first download the steam apps
   task.log('Downloading Steam apps');
-  await getSteamApps();
+  await getSteamApps(task);
   task.log('Steam apps downloaded');
   task.finish();
 });
 
 addon.on('library-search', (query, event) => {
   event.defer(async () => {
-    const results = steamAppSearcher.search(query, addon.config.getNumberValue('steam-limit'));
-    const realResults = await Promise.allSettled(results.map(async result => {
-      const realGame = await getRealGame(result.appid);
-      if (realGame) {
-        return realGame;
-      }
-      return undefined;
-    }));
-
-    const resolvedResults = realResults.filter(result => result.status === 'fulfilled').filter(result => result.value);
-    // filter duplicates
-    const uniqueResults = resolvedResults.filter((result, index, self) =>
-      index === self.findIndex((t) => t.value!.steam_appid === result.value!.steam_appid)
-    );
-    event.resolve(
-      uniqueResults.map(result => ({
-        appID: result.value!.steam_appid,
-        name: result.value!.name,
-        storefront: 'steam',
-        capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${result.value!.steam_appid}/header.jpg`
-      }))
-    );
+    try {
+      const results = await axios<SteamResult>({
+        url: `https://store.steampowered.com/search/results/?term=${encodeURI(query)}&category1=${encodeURI('998,994')}&ignore_preferences=1&cc=us&json=1`,
+        headers: {
+          'User-Agent': 'OGI Steam-Integration/1.0.0'
+        }
+      });
+      event.resolve(
+        results.data.items
+          .map(result => {
+            const match = result.logo.match(/apps\/(\d+)/);
+            if (!match) {
+              return null;
+            }
+            const appID = parseInt(match[1]);
+            return {
+              appID: appID,
+              name: result.name,
+              storefront: 'steam',
+              capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${appID}/header.jpg`,
+              similarity: stringSimilarity(result.name, query)
+            }
+          })
+          .filter(result => result && result.similarity >= 0.3)
+          .sort((a, b) => b!.similarity - a!.similarity) // sort by most similar (ascending)
+          .map((res) => {
+            const { similarity, ...rest } = res!;
+            return rest;
+          }) // remove similarity from final result
+      );
+    } catch (e) {
+      event.fail('Failed to search Steam');
+      return;
+    }
+    
   });
 });
 
