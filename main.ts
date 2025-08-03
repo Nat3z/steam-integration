@@ -225,7 +225,7 @@ addon.on('library-search', (query, event) => {
               similarity: stringSimilarity(result.name, query)
             }
           })
-          .filter(result => result && result.similarity >= 0.3)
+          .filter(result => result && result.similarity >= 0.1)
           .sort((a, b) => b!.similarity - a!.similarity) // sort by most similar (ascending)
           .map((res) => {
             const { similarity, ...rest } = res!;
