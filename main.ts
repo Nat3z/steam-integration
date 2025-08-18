@@ -18,12 +18,30 @@ function stringSimilarity(a: string, b: string): number {
   // Normalize and clean the strings
   const normalize = (str: string): string => {
     return str
-      .toLowerCase() 
+      .toLowerCase()
+      // Remove trademark symbols (™, ®, ©, etc.)
+      .replace(/[™®©℠]/g, '')
       // Remove year patterns like (2023), [2024], etc.
       .replace(/[\(\[\{]\d{4}[\)\]\}]/g, '')
-      // Remove edition suffixes but keep them for partial matching
-      .replace(/\s+(premium|deluxe|gold|ultimate|complete|goty|game\s+of\s+the\s+year|enhanced|definitive|remastered|directors?\s+cut)\s+(edition)?/gi, '')
-      // Clean up extra whitespace
+      // Remove common gaming suffixes and prefixes
+      .replace(/\s+(premium|deluxe|gold|ultimate|complete|goty|game\s+of\s+the\s+year|enhanced|definitive|remastered|directors?\s+cut|collectors?\s+edition|special\s+edition|digital\s+edition)\s*(edition)?/gi, '')
+      // Remove "the" at the beginning for better matching
+      .replace(/^the\s+/i, '')
+      // Normalize Roman numerals to Arabic numbers for better matching
+      .replace(/\biv\b/gi, '4')
+      .replace(/\biii\b/gi, '3') 
+      .replace(/\bii\b/gi, '2')
+      .replace(/\bvi\b/gi, '6')
+      .replace(/\bvii\b/gi, '7')
+      .replace(/\bviii\b/gi, '8')
+      .replace(/\bix\b/gi, '9')
+      .replace(/\bxi\b/gi, '11')
+      .replace(/\bxii\b/gi, '12')
+      // Handle common abbreviations
+      .replace(/\b&\b/g, 'and')
+      .replace(/\bvs\b/gi, 'versus')
+      // Clean up extra whitespace and punctuation
+      .replace(/[^\w\s]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   };
@@ -35,75 +53,271 @@ function stringSimilarity(a: string, b: string): number {
   if (cleanA === cleanB) return 1;
 
   // Split into words for word-level matching
-  const wordsA = cleanA.split(/\s+/).filter(word => word.length > 0);
-  const wordsB = cleanB.split(/\s+/).filter(word => word.length > 0);
+  const wordsA = cleanA.split(/\s+/).filter(word => word.length > 1); // Filter out single characters
+  const wordsB = cleanB.split(/\s+/).filter(word => word.length > 1);
 
   if (wordsA.length === 0 || wordsB.length === 0) return 0;
 
-  // Calculate word-level similarity
+  // Filter out extremely common words that shouldn't contribute much to similarity
+  const commonWords = new Set(['the', 'of', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'with', 'by']);
+  const significantWordsA = wordsA.filter(word => !commonWords.has(word) || word.length > 4);
+  const significantWordsB = wordsB.filter(word => !commonWords.has(word) || word.length > 4);
+
+  // If no significant words remain, fall back to all words but with lower threshold
+  const finalWordsA = significantWordsA.length > 0 ? significantWordsA : wordsA;
+  const finalWordsB = significantWordsB.length > 0 ? significantWordsB : wordsB;
+
+  // Calculate word-level similarity with stricter matching
   let exactMatches = 0;
-  let partialMatches = 0;
+  let strongPartialMatches = 0;
+  let weakPartialMatches = 0;
   const usedWordsB = new Set<number>();
 
-  for (const wordA of wordsA) {
+  for (const wordA of finalWordsA) {
     let bestMatch = 0;
     let bestMatchIndex = -1;
+    let matchType = 'none';
 
-    for (let i = 0; i < wordsB.length; i++) {
+    for (let i = 0; i < finalWordsB.length; i++) {
       if (usedWordsB.has(i)) continue;
 
-      const wordB = wordsB[i];
+      const wordB = finalWordsB[i];
       
       // Exact word match
       if (wordA === wordB) {
         exactMatches++;
         usedWordsB.add(i);
         bestMatchIndex = i;
+        matchType = 'exact';
         break;
       }
 
-      // Partial word match using character overlap
-      const overlap = calculateCharacterOverlap(wordA, wordB);
-      if (overlap > bestMatch && overlap > 0.6) {
+      // Check for substring matches (useful for abbreviated titles) - but more strict
+      if (wordA.length >= 4 && wordB.length >= 4) {
+        if (wordA.includes(wordB) || wordB.includes(wordA)) {
+          const similarity = Math.min(wordA.length, wordB.length) / Math.max(wordA.length, wordB.length);
+          if (similarity > bestMatch && similarity > 0.8) { // Increased threshold
+            bestMatch = similarity;
+            bestMatchIndex = i;
+            matchType = 'strong';
+          }
+        }
+      }
+
+      // Fuzzy character overlap matching - stricter threshold
+      const overlap = calculateJaccardSimilarity(wordA, wordB);
+      if (overlap > bestMatch && overlap > 0.75) { // Increased threshold
         bestMatch = overlap;
         bestMatchIndex = i;
+        matchType = 'strong';
+      }
+
+      // Levenshtein-based similarity for close matches - stricter threshold
+      const levenshtein = calculateLevenshteinSimilarity(wordA, wordB);
+      if (levenshtein > bestMatch && levenshtein > 0.8) { // Increased threshold
+        bestMatch = levenshtein;
+        bestMatchIndex = i;
+        matchType = levenshtein > 0.9 ? 'strong' : 'weak';
       }
     }
 
-    // If we found a good partial match and haven't used exact match
+    // Categorize matches by strength
     if (bestMatchIndex !== -1 && !usedWordsB.has(bestMatchIndex) && bestMatch > 0) {
-      partialMatches++;
+      if (matchType === 'strong') {
+        strongPartialMatches += bestMatch;
+      } else if (matchType === 'weak') {
+        weakPartialMatches += bestMatch * 0.5; // Heavily penalize weak matches
+      }
       usedWordsB.add(bestMatchIndex);
     }
   }
 
-  // Calculate similarity score
-  // Give more weight to exact matches, some weight to partial matches
-  const totalWords = Math.max(wordsA.length, wordsB.length);
+  // Calculate similarity score with stricter weighting
+  const totalWords = Math.max(finalWordsA.length, finalWordsB.length);
   const exactScore = exactMatches / totalWords;
-  const partialScore = (partialMatches * 0.7) / totalWords;
+  const strongPartialScore = (strongPartialMatches / totalWords) * 0.7; // Reduced weight
+  const weakPartialScore = (weakPartialMatches / totalWords) * 0.3; // Very low weight
   
-  return Math.min(1, exactScore + partialScore);
+  // Require minimum number of matches for longer queries
+  const minWordsMatched = exactMatches + Math.floor(strongPartialMatches) + Math.floor(weakPartialMatches);
+  const minRequiredMatches = Math.min(2, Math.floor(finalWordsA.length * 0.6)); // At least 60% of words should match
+  
+  if (minWordsMatched < minRequiredMatches) {
+    return 0; // Not enough matches, return 0
+  }
 
-  function calculateCharacterOverlap(str1: string, str2: string): number {
+  // Bonus for length similarity (helps with abbreviated vs full titles) - reduced
+  const lengthSimilarity = Math.min(cleanA.length, cleanB.length) / Math.max(cleanA.length, cleanB.length);
+  const lengthBonus = lengthSimilarity * 0.05; // Reduced bonus
+  
+  const totalScore = exactScore + strongPartialScore + weakPartialScore + lengthBonus;
+  
+  // Apply stricter threshold - require higher minimum score
+  return totalScore < 0.3 ? 0 : Math.min(1, totalScore);
+
+  function calculateJaccardSimilarity(str1: string, str2: string): number {
     if (str1.length < 2 || str2.length < 2) return str1 === str2 ? 1 : 0;
     
-    const bigrams1 = new Set<string>();
-    const bigrams2 = new Set<string>();
+    const shingles1 = new Set<string>();
+    const shingles2 = new Set<string>();
     
-    for (let i = 0; i < str1.length - 1; i++) {
-      bigrams1.add(str1.substring(i, i + 2));
+    // Use character trigrams for better accuracy
+    const shingleSize = Math.min(3, Math.min(str1.length, str2.length));
+    
+    for (let i = 0; i <= str1.length - shingleSize; i++) {
+      shingles1.add(str1.substring(i, i + shingleSize));
     }
     
-    for (let i = 0; i < str2.length - 1; i++) {
-      bigrams2.add(str2.substring(i, i + 2));
+    for (let i = 0; i <= str2.length - shingleSize; i++) {
+      shingles2.add(str2.substring(i, i + shingleSize));
     }
     
-    const intersection = [...bigrams1].filter(bg => bigrams2.has(bg)).length;
-    const union = bigrams1.size + bigrams2.size - intersection;
+    const intersection = [...shingles1].filter(sh => shingles2.has(sh)).length;
+    const union = shingles1.size + shingles2.size - intersection;
     
     return union > 0 ? intersection / union : 0;
   }
+
+  function calculateLevenshteinSimilarity(str1: string, str2: string): number {
+    const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
+
+    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+
+    for (let j = 1; j <= str2.length; j++) {
+      for (let i = 1; i <= str1.length; i++) {
+        const substitutionCost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        matrix[j][i] = Math.min(
+          matrix[j][i - 1] + 1, // deletion
+          matrix[j - 1][i] + 1, // insertion
+          matrix[j - 1][i - 1] + substitutionCost // substitution
+        );
+      }
+    }
+
+    const distance = matrix[str2.length][str1.length];
+    const maxLength = Math.max(str1.length, str2.length);
+    return maxLength > 0 ? 1 - distance / maxLength : 1;
+  }
+}
+
+function calculateSortScore(title: string, query: string, baseSimilarity: number): number {
+  const normalizeForSort = (str: string): string => {
+    return str
+      .toLowerCase()
+      .replace(/[™®©℠]/g, '')
+      .replace(/[\(\[\{]\d{4}[\)\]\}]/g, '')
+      .replace(/\s+(premium|deluxe|gold|ultimate|complete|goty|game\s+of\s+the\s+year|enhanced|definitive|remastered|directors?\s+cut|collectors?\s+edition|special\s+edition|digital\s+edition)\s*(edition)?/gi, '')
+      .replace(/^the\s+/i, '')
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const cleanTitle = normalizeForSort(title);
+  const cleanQuery = normalizeForSort(query);
+  
+  let sortScore = baseSimilarity;
+  
+  // Bonus for exact title match (after normalization)
+  if (cleanTitle === cleanQuery) {
+    return 1.0;
+  }
+  
+  // Bonus for title starting with query (strong indicator of main game vs spin-off)
+  if (cleanTitle.startsWith(cleanQuery)) {
+    sortScore += 0.3;
+  }
+  
+  // Bonus for query being a complete substring of title
+  if (cleanTitle.includes(cleanQuery)) {
+    sortScore += 0.2;
+  }
+  
+  // Split into words for more detailed analysis
+  const titleWords = cleanTitle.split(/\s+/);
+  const queryWords = cleanQuery.split(/\s+/);
+  
+  // Bonus for maintaining word order (important for sequels)
+  let orderBonus = 0;
+  let lastFoundIndex = -1;
+  let consecutiveMatches = 0;
+  
+  for (const queryWord of queryWords) {
+    const foundIndex = titleWords.findIndex((titleWord, index) => 
+      index > lastFoundIndex && (
+        titleWord === queryWord || 
+        titleWord.includes(queryWord) || 
+        queryWord.includes(titleWord)
+      )
+    );
+    
+    if (foundIndex !== -1) {
+      if (foundIndex === lastFoundIndex + 1) {
+        consecutiveMatches++;
+      }
+      lastFoundIndex = foundIndex;
+    }
+  }
+  
+  orderBonus = (consecutiveMatches / Math.max(queryWords.length, 1)) * 0.2;
+  sortScore += orderBonus;
+  
+  // Special handling for numbers and Roman numerals (important for game series)
+  const numberPattern = /\b(\d+|iv|iii|ii|vi|vii|viii|ix|xi|xii|v)\b/gi;
+  const queryNumbers = cleanQuery.match(numberPattern) || [];
+  const titleNumbers = cleanTitle.match(numberPattern) || [];
+  
+  if (queryNumbers.length > 0) {
+    // Normalize Roman numerals for comparison
+    const normalizeNumber = (num: string): string => {
+      const romanMap: { [key: string]: string } = {
+        'iv': '4', 'iii': '3', 'ii': '2', 'vi': '6', 'vii': '7', 
+        'viii': '8', 'ix': '9', 'xi': '11', 'xii': '12', 'v': '5'
+      };
+      return romanMap[num.toLowerCase()] || num;
+    };
+    
+    const normalizedQueryNumbers = queryNumbers.map(normalizeNumber);
+    const normalizedTitleNumbers = titleNumbers.map(normalizeNumber);
+    
+    // Exact number match bonus
+    const numberMatches = normalizedQueryNumbers.filter(qNum => 
+      normalizedTitleNumbers.includes(qNum)
+    ).length;
+    
+    if (numberMatches === queryNumbers.length && numberMatches > 0) {
+      sortScore += 0.25; // Strong bonus for exact number/numeral matches
+    }
+    
+    // Penalty for titles with different numbers (likely different games in series)
+    const hasConflictingNumbers = normalizedTitleNumbers.some(tNum => 
+      normalizedQueryNumbers.length > 0 && 
+      !normalizedQueryNumbers.includes(tNum) && 
+      /^\d+$/.test(tNum)
+    );
+    
+    if (hasConflictingNumbers) {
+      sortScore -= 0.3; // Penalty for conflicting numbers
+    }
+  }
+  
+  // Penalty for generic terms that might indicate spin-offs
+  const genericTerms = ['online', 'mobile', 'legends', 'heroes', 'chronicles', 'tales', 'stories', 'collection'];
+  const titleHasGeneric = genericTerms.some(term => cleanTitle.includes(term));
+  const queryHasGeneric = genericTerms.some(term => cleanQuery.includes(term));
+  
+  if (titleHasGeneric && !queryHasGeneric) {
+    sortScore -= 0.15; // Penalty for spin-offs when not specifically searched
+  }
+  
+  // Length penalty for overly long titles (often special editions or bundles)
+  const lengthRatio = cleanTitle.length / cleanQuery.length;
+  if (lengthRatio > 2.5) {
+    sortScore -= 0.1;
+  }
+  
+  return Math.max(0, Math.min(1, sortScore));
 }
 
 async function getRealGame(titleId: number): Promise<GameData | undefined> {
@@ -217,20 +431,23 @@ addon.on('library-search', (query, event) => {
               return null;
             }
             const appID = parseInt(match[1]);
+            const similarity = stringSimilarity(result.name, query);
+            const sortScore = calculateSortScore(result.name, query, similarity);
             return {
               appID: appID,
               name: result.name,
               storefront: 'steam',
               capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${appID}/header.jpg`,
-              similarity: stringSimilarity(result.name, query)
+              similarity: similarity,
+              sortScore: sortScore
             }
           })
           .filter(result => result && result.similarity >= 0.1)
-          .sort((a, b) => b!.similarity - a!.similarity) // sort by most similar (ascending)
+          .sort((a, b) => b!.sortScore - a!.sortScore) // sort by enhanced sort score
           .map((res) => {
-            const { similarity, ...rest } = res!;
+            const { similarity, sortScore, ...rest } = res!;
             return rest;
-          }) // remove similarity from final result
+          }) // remove similarity and sortScore from final result
       );
     } catch (e) {
       event.fail('Failed to search Steam');
