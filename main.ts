@@ -358,40 +358,40 @@ async function getRealGame(titleId: number): Promise<GameData | undefined> {
   }
 }
 
-const steamAppSearcher = new SearchTool<{ appid: number; name: string }>([], ['appid', 'name'], {
-  threshold: 0.3,
-  includeScore: true
-});
+// const steamAppSearcher = new SearchTool<{ appid: number; name: string }>([], ['appid', 'name'], {
+//   threshold: 0.3,
+//   includeScore: true
+// });
 
-export async function getSteamApps(task: CustomTask) {
-  if (fs.existsSync(join(__dirname, 'steam-apps.json'))) {
-    const steamApps: {
-      timeSinceUpdate: number;
-      data: { appid: number; name: string }[];
-    } = JSON.parse(
-      fs.readFileSync(join(__dirname, 'steam-apps.json'), 'utf-8')
-    );
-    if (Date.now() - steamApps.timeSinceUpdate < 86400000) {
-      //24 hours
-      steamAppSearcher.addItems(steamApps.data);
-      return;
-    }
-  }
-  task.log('Downloading Steam apps');
-  try {
-    const response = await axios.get(
-      'https://api.steampowered.com/ISteamApps/GetAppList/v0002/?key=STEAMKEY&format=json'
-    );
-    const steamApps = response.data.applist.apps;
-    fs.writeFileSync(
-      join(__dirname, 'steam-apps.json'),
-      JSON.stringify({ timeSinceUpdate: Date.now(), data: steamApps }, null, 2)
-    );
-    steamAppSearcher.addItems(steamApps); 
-  } catch (e) {
-    task.fail('Failed to download Steam apps');
-  }
-}
+// export async function getSteamApps(task: CustomTask) {
+//   if (fs.existsSync(join(__dirname, 'steam-apps.json'))) {
+//     const steamApps: {
+//       timeSinceUpdate: number;
+//       data: { appid: number; name: string }[];
+//     } = JSON.parse(
+//       fs.readFileSync(join(__dirname, 'steam-apps.json'), 'utf-8')
+//     );
+//     if (Date.now() - steamApps.timeSinceUpdate < 86400000) {
+//       //24 hours
+//       steamAppSearcher.addItems(steamApps.data);
+//       return;
+//     }
+//   }
+//   task.log('Downloading Steam apps');
+//   try {
+//     const response = await axios.get(
+//       'https://api.steampowered.com/ISteamApps/GetAppList/v0002/?key=STEAMKEY&format=json'
+//     );
+//     const steamApps = response.data.applist.apps;
+//     fs.writeFileSync(
+//       join(__dirname, 'steam-apps.json'),
+//       JSON.stringify({ timeSinceUpdate: Date.now(), data: steamApps }, null, 2)
+//     );
+//     steamAppSearcher.addItems(steamApps); 
+//   } catch (e) {
+//     task.fail('Failed to download Steam apps');
+//   }
+// }
 
 addon.on('configure', (config) => config.addNumberOption(option => 
     option
@@ -406,12 +406,12 @@ addon.on('configure', (config) => config.addNumberOption(option =>
 );
 
 addon.on('connect', async () => {
-  const task = await addon.task();
-  // going to first download the steam apps
-  task.log('Downloading Steam apps');
-  await getSteamApps(task);
-  task.log('Steam apps downloaded');
-  task.finish();
+  // const task = await addon.task();
+  // // going to first download the steam apps
+  // task.log('Downloading Steam apps');
+  // // await getSteamApps(task);
+  // task.log('Steam apps downloaded');
+  // task.finish();
 });
 
 addon.on('library-search', (query, event) => {
