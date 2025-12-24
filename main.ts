@@ -149,6 +149,8 @@ async function processUpdateQueue(appID: number): Promise<void> {
         const cachedUpdate = getCachedUpdate(appID);
         if (cachedUpdate) {
           console.log(`Using cached update info for ${appID} (version: ${cachedUpdate.version})`);
+          console.log(`Request current version: ${request.currentVersion}`);
+          console.log(`Request available: ${cachedUpdate.version !== request.currentVersion}`);
           request.resolve({
             version: cachedUpdate.version,
             available: cachedUpdate.version !== request.currentVersion
@@ -786,23 +788,15 @@ addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => 
   console.log('Checking for updates for ' + appID + ' (' + req + ')');
   event.defer(async () => {
     // Check cache first - return immediately if cached
-    const cachedUpdate = getCachedUpdate(appID);
-    if (cachedUpdate) {
-      console.log(`Using cached update info for ${appID} (version: ${cachedUpdate.version}) (${req})`);
-      event.resolve({
-        version: cachedUpdate.version,
-        available: cachedUpdate.version !== currentVersion
-      });
-      return;
-    }
-    await new Promise(resolve => setTimeout(resolve, 1000 * req));
-
     // handle resolving 1.0 file versions with auto resolution
     if (currentVersion === '1.0' || currentVersion === '1.0.0') {
       // assume that the current version is the latest version as stored by the resolver
       currentVersion = await resolve10FileVersion(appID);
       console.log('Resolved 1.0 file version for ' + appID + ' to ' + currentVersion + ' (' + req + ')');
     }
+
+    await new Promise(resolve => setTimeout(resolve, UPDATE_COOLDOWN_MS * req));
+
     
     // Cache miss - queue the request for API call and return the result
     const result = await queueUpdateCheck(appID, currentVersion);
