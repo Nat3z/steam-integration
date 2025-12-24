@@ -14,6 +14,66 @@ const addon = new OGIAddon({
   storefronts: ['steam']
 });
 
+const UPDATE_CACHE_FILE = join(__dirname, 'update-cache.json');
+const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day in milliseconds
+
+type UpdateCacheEntry = {
+  version: string;
+  timestamp: number;
+};
+
+type UpdateCache = {
+  [appID: string]: UpdateCacheEntry;
+};
+
+function readUpdateCache(): UpdateCache {
+  try {
+    if (fs.existsSync(UPDATE_CACHE_FILE)) {
+      const cacheData = fs.readFileSync(UPDATE_CACHE_FILE, 'utf-8');
+      return JSON.parse(cacheData);
+    }
+  } catch (e) {
+    console.error('Error reading update cache:', e);
+  }
+  return {};
+}
+
+function writeUpdateCache(cache: UpdateCache): void {
+  try {
+    fs.writeFileSync(UPDATE_CACHE_FILE, JSON.stringify(cache, null, 2));
+  } catch (e) {
+    console.error('Error writing update cache:', e);
+  }
+}
+
+function getCachedUpdate(appID: number): UpdateCacheEntry | null {
+  const cache = readUpdateCache();
+  const entry = cache[appID.toString()];
+  
+  if (!entry) {
+    return null;
+  }
+  
+  const age = Date.now() - entry.timestamp;
+  if (age >= CACHE_DURATION_MS) {
+    // Cache expired, remove it
+    delete cache[appID.toString()];
+    writeUpdateCache(cache);
+    return null;
+  }
+  
+  return entry;
+}
+
+function setCachedUpdate(appID: number, version: string): void {
+  const cache = readUpdateCache();
+  cache[appID.toString()] = {
+    version,
+    timestamp: Date.now()
+  };
+  writeUpdateCache(cache);
+}
+
 function stringSimilarity(a: string, b: string): number {
   // Normalize and clean the strings
   const normalize = (str: string): string => {
@@ -600,12 +660,30 @@ addon.on('catalog', (event) => {
 addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => {
   console.log('Checking for updates for ' + appID);
   event.defer(async () => {
+    // Check cache first
+    const cachedUpdate = getCachedUpdate(appID);
+    if (cachedUpdate) {
+      console.log(`Using cached update info for ${appID} (version: ${cachedUpdate.version})`);
+      event.resolve({
+        version: cachedUpdate.version,
+        available: cachedUpdate.version !== currentVersion
+      });
+      return;
+    }
+    
+    // Cache miss or expired, fetch fresh data
     const steamAppInfo = await getSteamAppInfo(appID);
     if (!steamAppInfo) {
       event.fail('Steam app info not found');
       return;
     }
-    const version = !steamAppInfo.data[appID].common.public_only ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! : '1.0.0'
+    const version = steamAppInfo.data[appID].common.public_only === undefined
+      ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! 
+      : '1.0.0';
+    
+    // Cache the result
+    setCachedUpdate(appID, version);
+    
     event.resolve({
       version,
       available: version !== currentVersion

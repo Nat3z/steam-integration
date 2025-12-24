@@ -175,3 +175,4 @@ dist
 .DS_Store
 *.log
 steam-apps.json
+update-cache.json
