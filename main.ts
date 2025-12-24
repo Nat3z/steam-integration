@@ -2,7 +2,7 @@ import OGIAddon, { CustomTask, SearchTool, type BasicLibraryInfo, type SearchRes
 import { join } from "path";
 import fs from "fs";
 import axios from "axios";
-import { type GameData } from "./lib/types";
+import { type GameData, type SteamAppInfo, type SteamAppInfoResponse } from "./lib/types";
 
 const addon = new OGIAddon({
   name: 'Steam Catalog',
@@ -198,6 +198,21 @@ function stringSimilarity(a: string, b: string): number {
     const distance = matrix[str2.length][str1.length];
     const maxLength = Math.max(str1.length, str2.length);
     return maxLength > 0 ? 1 - distance / maxLength : 1;
+  }
+}
+
+async function getSteamAppInfo(appID: number): Promise<SteamAppInfoResponse | undefined> {
+  try {
+    const response = await axios<SteamAppInfoResponse>({
+      url: `https://api.steamcmd.net/v1/info/${appID}`,
+      headers: {
+        'User-Agent': 'OGI Steam-Integration/1.0.0'
+      }
+    });
+    return response.data;
+  } catch (e) {
+    console.error(e);
+    return undefined;
   }
 }
 
@@ -461,18 +476,43 @@ addon.on('game-details', ({ appID, storefront }, event) => {
   event.defer(async () => {
     const realGame = await getRealGame(appID);
     if (realGame) {
+      const steamAppInfo = await getSteamAppInfo(realGame.steam_appid);
+      if (!steamAppInfo) {
+        event.fail('Steam app info not found');
+        console.error('Steam app info not found for ' + realGame.steam_appid);
+        return;
+      }
+      const baseAssetUrl = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/' + realGame.steam_appid + '/';
+      if (!steamAppInfo.data[realGame.steam_appid]) {
+        event.fail('Steam app info not found');
+        console.error('Steam app info not found for ' + realGame.steam_appid);
+        return;
+      }
+
+      const assets = steamAppInfo.data[realGame.steam_appid].common.library_assets_full;
+      // Helper function: get image by language, defaulting to English, else first available
+      function getAssetImage(assetData?: { image?: Record<string, string> }) {
+        if (!assetData?.image) return undefined;
+        return baseAssetUrl + (assetData.image['english'] ?? assetData.image[Object.keys(assetData.image)[0]]);
+      }
+      const libraryHero = getAssetImage(assets?.library_hero) ?? `https://steamcdn-a.akamaihd.net/steam/apps/${realGame.steam_appid}/library_hero.jpg`;
+      const libraryCapsule = getAssetImage(assets?.library_capsule) ?? `https://steamcdn-a.akamaihd.net/steam/apps/${realGame.steam_appid}/library_600x900_2x.jpg`;
+      console.log(appID, 'is public only?', steamAppInfo.data[realGame.steam_appid].common.public_only === '1' ? 'yes' : 'no');
+
       event.resolve({
         appID: realGame.steam_appid,
         name: realGame.name,
-        capsuleImage: `https://steamcdn-a.akamaihd.net/steam/apps/${appID}/library_600x900_2x.jpg`,
-        headerImage: `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${realGame.steam_appid}/library_hero.jpg`,
+        capsuleImage: libraryCapsule,
+        headerImage: libraryHero,
         publishers: realGame.publishers,
         developers: realGame.developers,
         releaseDate: realGame.release_date.date,
-        coverImage: `https://steamcdn-a.akamaihd.net/steam/apps/${realGame.steam_appid}/library_hero.jpg`,
+        coverImage: libraryHero,
         basicDescription: realGame.short_description,
-        description: realGame.detailed_description
+        description: realGame.detailed_description,
+        latestVersion: steamAppInfo.data[realGame.steam_appid].common.public_only === '1' ? steamAppInfo?.data[realGame.steam_appid].depots.branches!['public'].buildid! : '1.0.0'
       });
+      return;
     }
     event.fail('Game not found');
   });
@@ -554,6 +594,22 @@ addon.on('catalog', (event) => {
       };
     }
     event.resolve(catalogResults);
+  });
+});
+
+addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => {
+  console.log('Checking for updates for ' + appID);
+  event.defer(async () => {
+    const steamAppInfo = await getSteamAppInfo(appID);
+    if (!steamAppInfo) {
+      event.fail('Steam app info not found');
+      return;
+    }
+    const version = !steamAppInfo.data[appID].common.public_only ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! : '1.0.0'
+    event.resolve({
+      version,
+      available: version !== currentVersion
+    });
   });
 });
 
