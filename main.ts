@@ -780,27 +780,33 @@ addon.on('catalog', (event) => {
   });
 });
 
+let req = 0;
 addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => {
-  console.log('Checking for updates for ' + appID);
+  req++;
+  console.log('Checking for updates for ' + appID + ' (' + req + ')');
   event.defer(async () => {
     // Check cache first - return immediately if cached
     const cachedUpdate = getCachedUpdate(appID);
     if (cachedUpdate) {
-      console.log(`Using cached update info for ${appID} (version: ${cachedUpdate.version})`);
+      console.log(`Using cached update info for ${appID} (version: ${cachedUpdate.version}) (${req})`);
       event.resolve({
         version: cachedUpdate.version,
         available: cachedUpdate.version !== currentVersion
       });
       return;
     }
-    
-    // Cache miss - queue the request for API call
-    try {
-      const result = await queueUpdateCheck(appID, currentVersion);
-      event.resolve(result);
-    } catch (error) {
-      event.fail(typeof error === 'string' ? error : 'Failed to check for updates');
+    await new Promise(resolve => setTimeout(resolve, 1000 * req));
+
+    // handle resolving 1.0 file versions with auto resolution
+    if (currentVersion === '1.0' || currentVersion === '1.0.0') {
+      // assume that the current version is the latest version as stored by the resolver
+      currentVersion = await resolve10FileVersion(appID);
+      console.log('Resolved 1.0 file version for ' + appID + ' to ' + currentVersion + ' (' + req + ')');
     }
+    
+    // Cache miss - queue the request for API call and return the result
+    const result = await queueUpdateCheck(appID, currentVersion);
+    event.resolve(result);
   });
 });
 
@@ -808,3 +814,30 @@ addon.on('disconnect', () => {
   process.exit(0);
 });
 
+// 1.0 file version auto resolution
+type Resolved10FileVersions = {
+  [appID: number]: string;
+}
+
+let resolved10FileVersions: Resolved10FileVersions = {};
+if (fs.existsSync(join(__dirname, 'resolved10FileVersions.json'))) {
+  resolved10FileVersions = JSON.parse(fs.readFileSync(join(__dirname, 'resolved10FileVersions.json'), 'utf-8'));
+}
+async function resolve10FileVersion(appID: number) {
+  if (resolved10FileVersions[appID]) {
+    return resolved10FileVersions[appID];
+  }
+  const steamAppInfo = await getSteamAppInfo(appID);
+  if (!steamAppInfo) {
+    return '1.0';
+  }
+
+  // get the current version and assume that our version is the latest as to prevent issues where all games are outdated.
+  // this functionality will be removed in the future.
+  const version = steamAppInfo.data[appID].common.public_only === undefined
+    ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! 
+    : '1.0';
+  resolved10FileVersions[appID] = version;
+  fs.writeFileSync(join(__dirname, 'resolved10FileVersions.json'), JSON.stringify(resolved10FileVersions, null, 2));
+  return version;
+}

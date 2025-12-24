@@ -176,3 +176,4 @@ dist
 *.log
 steam-apps.json
 update-cache.json
+resolved10FileVersions.json
