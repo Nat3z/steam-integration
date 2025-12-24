@@ -18,8 +18,16 @@ const UPDATE_CACHE_FILE = join(__dirname, 'update-cache.json');
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 const UPDATE_COOLDOWN_MS = 1500; // 1.5 seconds cooldown per game
 
-// In-memory cooldown tracking: appID -> last check timestamp
-const updateCooldowns = new Map<number, number>();
+// Queue system for update checks: appID -> queue of pending requests
+type UpdateCheckRequest = {
+  appID: number;
+  currentVersion: string;
+  resolve: (result: { version: string; available: boolean }) => void;
+  reject: (error: string) => void;
+};
+
+const updateQueues = new Map<number, UpdateCheckRequest[]>();
+const queueProcessors = new Map<number, boolean>(); // Track if a queue is being processed
 
 type UpdateCacheEntry = {
   version: string;
@@ -78,18 +86,115 @@ function setCachedUpdate(appID: number, version: string): void {
   writeUpdateCache(cache);
 }
 
-async function waitForCooldown(appID: number): Promise<void> {
-  const lastCheck = updateCooldowns.get(appID);
-  if (lastCheck) {
-    const timeSinceLastCheck = Date.now() - lastCheck;
-    if (timeSinceLastCheck < UPDATE_COOLDOWN_MS) {
-      const waitTime = UPDATE_COOLDOWN_MS - timeSinceLastCheck;
+let lastApiCallTime = new Map<number, number>();
+
+async function processUpdateCheck(request: UpdateCheckRequest): Promise<void> {
+  const { appID, currentVersion, resolve, reject } = request;
+  
+  // Cache check is done in queue processor, so we only get here if cache miss
+  // Check if we need to wait for cooldown
+  const lastCall = lastApiCallTime.get(appID);
+  if (lastCall) {
+    const timeSinceLastCall = Date.now() - lastCall;
+    if (timeSinceLastCall < UPDATE_COOLDOWN_MS) {
+      const waitTime = UPDATE_COOLDOWN_MS - timeSinceLastCall;
       console.log(`Cooldown active for appID ${appID}, waiting ${waitTime}ms`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
-  // Update the last check time
-  updateCooldowns.set(appID, Date.now());
+  
+  // Make API call
+  lastApiCallTime.set(appID, Date.now());
+  const steamAppInfo = await getSteamAppInfo(appID);
+  
+  if (!steamAppInfo) {
+    reject('Steam app info not found');
+    return;
+  }
+  
+  const version = steamAppInfo.data[appID].common.public_only === undefined
+    ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! 
+    : '1.0.0';
+  
+  // Cache the result
+  setCachedUpdate(appID, version);
+  
+  resolve({
+    version,
+    available: version !== currentVersion
+  });
+}
+
+async function processUpdateQueue(appID: number): Promise<void> {
+  // Mark this queue as being processed
+  if (queueProcessors.get(appID)) {
+    return; // Already processing
+  }
+  
+  queueProcessors.set(appID, true);
+  
+  try {
+    while (true) {
+      const queue = updateQueues.get(appID);
+      if (!queue || queue.length === 0) {
+        break; // Queue is empty, we're done
+      }
+      
+      // Process the first request in the queue
+      const request = queue.shift()!;
+      let madeApiCall = false;
+      
+      try {
+        // Check cache first - if cached, serve immediately without API call
+        const cachedUpdate = getCachedUpdate(appID);
+        if (cachedUpdate) {
+          console.log(`Using cached update info for ${appID} (version: ${cachedUpdate.version})`);
+          request.resolve({
+            version: cachedUpdate.version,
+            available: cachedUpdate.version !== request.currentVersion
+          });
+          // No API call made, continue to next item immediately
+          continue;
+        }
+        
+        // Cache miss - need to make API call
+        madeApiCall = true;
+        await processUpdateCheck(request);
+      } catch (error) {
+        request.reject(typeof error === 'string' ? error : 'Unknown error');
+      }
+      
+      // Only wait for cooldown if we made an API call and there are more requests
+      if (madeApiCall && queue.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, UPDATE_COOLDOWN_MS));
+      }
+    }
+  } finally {
+    // Clean up
+    queueProcessors.delete(appID);
+    updateQueues.delete(appID);
+  }
+}
+
+function queueUpdateCheck(appID: number, currentVersion: string): Promise<{ version: string; available: boolean }> {
+  return new Promise((resolve, reject) => {
+    // Add request to queue
+    if (!updateQueues.has(appID)) {
+      updateQueues.set(appID, []);
+    }
+    
+    updateQueues.get(appID)!.push({
+      appID,
+      currentVersion,
+      resolve,
+      reject
+    });
+    
+    // Start processing if not already processing
+    processUpdateQueue(appID).catch(error => {
+      console.error(`Error processing update queue for ${appID}:`, error);
+    });
+  });
 }
 
 function stringSimilarity(a: string, b: string): number {
@@ -678,7 +783,7 @@ addon.on('catalog', (event) => {
 addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => {
   console.log('Checking for updates for ' + appID);
   event.defer(async () => {
-    // Check cache first
+    // Check cache first - return immediately if cached
     const cachedUpdate = getCachedUpdate(appID);
     if (cachedUpdate) {
       console.log(`Using cached update info for ${appID} (version: ${cachedUpdate.version})`);
@@ -689,25 +794,13 @@ addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => 
       return;
     }
     
-    // Cache miss or expired, wait for cooldown before fetching fresh data
-    await waitForCooldown(appID);
-    
-    const steamAppInfo = await getSteamAppInfo(appID);
-    if (!steamAppInfo) {
-      event.fail('Steam app info not found');
-      return;
+    // Cache miss - queue the request for API call
+    try {
+      const result = await queueUpdateCheck(appID, currentVersion);
+      event.resolve(result);
+    } catch (error) {
+      event.fail(typeof error === 'string' ? error : 'Failed to check for updates');
     }
-    const version = steamAppInfo.data[appID].common.public_only === undefined
-      ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! 
-      : '1.0.0';
-    
-    // Cache the result
-    setCachedUpdate(appID, version);
-    
-    event.resolve({
-      version,
-      available: version !== currentVersion
-    });
   });
 });
 
