@@ -114,7 +114,7 @@ async function processUpdateCheck(request: UpdateCheckRequest): Promise<void> {
   
   const version = steamAppInfo.data[appID].common.public_only === undefined
     ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! 
-    : '1.0.0';
+    : '1.0';
   
   // Cache the result
   setCachedUpdate(appID, version);
@@ -693,7 +693,7 @@ addon.on('game-details', ({ appID, storefront }, event) => {
         coverImage: libraryHero,
         basicDescription: realGame.short_description,
         description: realGame.detailed_description,
-        latestVersion: steamAppInfo.data[realGame.steam_appid].common.public_only === '1' ? steamAppInfo?.data[realGame.steam_appid].depots.branches!['public'].buildid! : '1.0.0'
+        latestVersion: steamAppInfo.data[realGame.steam_appid].common.public_only === undefined ? steamAppInfo?.data[realGame.steam_appid].depots.branches!['public'].buildid! : '1.0'
       });
       return;
     }
