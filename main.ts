@@ -16,6 +16,10 @@ const addon = new OGIAddon({
 
 const UPDATE_CACHE_FILE = join(__dirname, 'update-cache.json');
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day in milliseconds
+const UPDATE_COOLDOWN_MS = 1500; // 1.5 seconds cooldown per game
+
+// In-memory cooldown tracking: appID -> last check timestamp
+const updateCooldowns = new Map<number, number>();
 
 type UpdateCacheEntry = {
   version: string;
@@ -72,6 +76,20 @@ function setCachedUpdate(appID: number, version: string): void {
     timestamp: Date.now()
   };
   writeUpdateCache(cache);
+}
+
+async function waitForCooldown(appID: number): Promise<void> {
+  const lastCheck = updateCooldowns.get(appID);
+  if (lastCheck) {
+    const timeSinceLastCheck = Date.now() - lastCheck;
+    if (timeSinceLastCheck < UPDATE_COOLDOWN_MS) {
+      const waitTime = UPDATE_COOLDOWN_MS - timeSinceLastCheck;
+      console.log(`Cooldown active for appID ${appID}, waiting ${waitTime}ms`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+  }
+  // Update the last check time
+  updateCooldowns.set(appID, Date.now());
 }
 
 function stringSimilarity(a: string, b: string): number {
@@ -671,7 +689,9 @@ addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => 
       return;
     }
     
-    // Cache miss or expired, fetch fresh data
+    // Cache miss or expired, wait for cooldown before fetching fresh data
+    await waitForCooldown(appID);
+    
     const steamAppInfo = await getSteamAppInfo(appID);
     if (!steamAppInfo) {
       event.fail('Steam app info not found');
