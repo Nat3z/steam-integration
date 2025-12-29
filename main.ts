@@ -695,7 +695,7 @@ addon.on('game-details', ({ appID, storefront }, event) => {
         coverImage: libraryHero,
         basicDescription: realGame.short_description,
         description: realGame.detailed_description,
-        latestVersion: steamAppInfo.data[realGame.steam_appid].common.public_only === undefined ? steamAppInfo?.data[realGame.steam_appid].depots.branches!['public'].buildid! : '1.0'
+        latestVersion: steamAppInfo.data[realGame.steam_appid].depots !== undefined ? steamAppInfo?.data[realGame.steam_appid].depots.branches!['public'].buildid! : '1.0'
       });
       return;
     }
