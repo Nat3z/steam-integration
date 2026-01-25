@@ -4,7 +4,7 @@
   "type": "module",
   "dependencies": {
     "axios": "^1.11.0",
-    "ogi-addon": "1.9.1"
+    "ogi-addon": "^2.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.1.0",

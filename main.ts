@@ -1,4 +1,4 @@
-import OGIAddon, { CustomTask, SearchTool, type BasicLibraryInfo, type SearchResult } from "ogi-addon";
+import OGIAddon, { ConfigurationBuilder, type BasicLibraryInfo } from "ogi-addon";
 import { join } from "path";
 import fs from "fs";
 import axios from "axios";
@@ -16,7 +16,7 @@ const addon = new OGIAddon({
 
 const UPDATE_CACHE_FILE = join(__dirname, 'update-cache.json');
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day in milliseconds
-const UPDATE_COOLDOWN_MS = 1500; // 1.5 seconds cooldown per game
+let UPDATE_COOLDOWN_MS = 1500; // 1.5 seconds cooldown per game
 
 // Queue system for update checks: appID -> queue of pending requests
 type UpdateCheckRequest = {
@@ -535,22 +535,6 @@ async function getRealGame(titleId: number): Promise<GameData | undefined> {
       return response.data[titleId].data;
     }
 
-    // if (
-    //   response.data[titleId].data.type === 'dlc' ||
-    //   response.data[titleId].data.type === 'dlc_sub' ||
-    //   response.data[titleId].data.type === 'music' ||
-    //   response.data[titleId].data.type === 'video' ||
-    //   response.data[titleId].data.type === 'episode'
-    // ) {
-    //   if (!response.data[titleId].data.fullgame) {
-    //     return undefined;
-    //   }
-    //   return response.data[titleId].data.fullgame;
-    // }
-    // if (response.data[titleId].data.type === 'demo') {
-    //   return response.data[titleId].data.fullgame;
-    // }
-
     return undefined;
   } catch (e) {
     console.error(e);
@@ -558,42 +542,8 @@ async function getRealGame(titleId: number): Promise<GameData | undefined> {
   }
 }
 
-// const steamAppSearcher = new SearchTool<{ appid: number; name: string }>([], ['appid', 'name'], {
-//   threshold: 0.3,
-//   includeScore: true
-// });
-
-// export async function getSteamApps(task: CustomTask) {
-//   if (fs.existsSync(join(__dirname, 'steam-apps.json'))) {
-//     const steamApps: {
-//       timeSinceUpdate: number;
-//       data: { appid: number; name: string }[];
-//     } = JSON.parse(
-//       fs.readFileSync(join(__dirname, 'steam-apps.json'), 'utf-8')
-//     );
-//     if (Date.now() - steamApps.timeSinceUpdate < 86400000) {
-//       //24 hours
-//       steamAppSearcher.addItems(steamApps.data);
-//       return;
-//     }
-//   }
-//   task.log('Downloading Steam apps');
-//   try {
-//     const response = await axios.get(
-//       'https://api.steampowered.com/ISteamApps/GetAppList/v0002/?key=STEAMKEY&format=json'
-//     );
-//     const steamApps = response.data.applist.apps;
-//     fs.writeFileSync(
-//       join(__dirname, 'steam-apps.json'),
-//       JSON.stringify({ timeSinceUpdate: Date.now(), data: steamApps }, null, 2)
-//     );
-//     steamAppSearcher.addItems(steamApps); 
-//   } catch (e) {
-//     task.fail('Failed to download Steam apps');
-//   }
-// }
-
-addon.on('configure', (config) => config.addNumberOption(option => 
+addon.on('configure', (config) => config
+  .addNumberOption(option => 
     option
       .setName('steam-limit')
       .setDisplayName('Steam Search Limit')
@@ -603,15 +553,40 @@ addon.on('configure', (config) => config.addNumberOption(option =>
       .setDefaultValue(5)
       .setInputType('range')
   )
+  .addNumberOption(option =>
+    option
+      .setName('update-cooldown')
+      .setDisplayName('Update Cooldown')
+      .setDescription('The amount of time in seconds to wait between game checks.')
+      .setMin(1)
+      .setMax(10)
+      .setDefaultValue(1)
+      .setInputType('range')
+  )
+  .addActionOption(action =>
+    action
+      .setName('checkForUpdates')
+      .setDisplayName('Delete Cached Checks for Updates')
+      .setDescription('Clears all cached checks for updates.')
+      .setTaskName('checkForUpdates')
+  )
 );
 
+addon.onTask('checkForUpdates', async (task) => {
+  task.log('Checking for game updates');
+  updateQueues.clear();
+  lastApiCallTime.clear();
+
+  // clear the update cache
+  fs.writeFileSync(join(__dirname, 'update-cache.json'), JSON.stringify({}, null, 2));
+  await task.askForInput('All Cached Updates Cleared', 'All checks for updates have been cleared. To re-run a check for updates, restart the addon server by going to Settings > General > Restart Addon Server.', new ConfigurationBuilder());
+  task.complete();
+});
+
 addon.on('connect', async () => {
-  // const task = await addon.task();
-  // // going to first download the steam apps
-  // task.log('Downloading Steam apps');
-  // // await getSteamApps(task);
-  // task.log('Steam apps downloaded');
-  // task.finish();
+  console.log('Steam integration connected');
+  UPDATE_COOLDOWN_MS = addon.config.getNumberValue('update-cooldown') * 1000;
+  console.log('Update cooldown set to ' + UPDATE_COOLDOWN_MS + 'ms');
 });
 
 addon.on('library-search', (query, event) => {
@@ -793,6 +768,16 @@ addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => 
       // assume that the current version is the latest version as stored by the resolver
       currentVersion = await resolve10FileVersion(appID);
       console.log('Resolved 1.0 file version for ' + appID + ' to ' + currentVersion + ' (' + req + ')');
+    }
+
+    // if the update is already cached, return the result immediately
+    const cachedUpdate = getCachedUpdate(appID);
+    if (cachedUpdate) {
+      event.resolve({
+        version: cachedUpdate.version,
+        available: cachedUpdate.version !== currentVersion
+      });
+      return;
     }
 
     await new Promise(resolve => setTimeout(resolve, UPDATE_COOLDOWN_MS * req));

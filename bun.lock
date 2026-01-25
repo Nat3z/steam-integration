@@ -5,7 +5,7 @@
       "name": "steam-integration",
       "dependencies": {
         "axios": "^1.11.0",
-        "ogi-addon": "1.9.1",
+        "ogi-addon": "^2.1.0",
       },
       "devDependencies": {
         "@types/node": "^24.1.0",
@@ -62,7 +62,7 @@
 
     "mime-types": ["mime-types@2.1.35", "", { "dependencies": { "mime-db": "1.52.0" } }, "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw=="],
 
-    "ogi-addon": ["ogi-addon@1.9.1", "", { "dependencies": { "fuse.js": "^7.1.0", "ws": "^8.4.0", "zod": "^3.23.8" } }, "sha512-082+cPaW6HnO3WOp3E6lt8FOzDazuPs3S90jY2Bm1vUwwFWoDsyyN38pg6MoCGXFH1JFB0YvANgzh99SCTZXlw=="],
+    "ogi-addon": ["ogi-addon@2.1.0", "", { "dependencies": { "fuse.js": "^7.1.0", "ws": "^8.4.0", "zod": "^3.23.8" } }, "sha512-mxGfgCROdCGaYaSrQz3S7u6taXbr/qUeiAusZNNEBHsBoFY+nb8q4M9pr8VxT3mtPCtT5y5u1G5oE2+EYffluQ=="],
 
     "proxy-from-env": ["proxy-from-env@1.1.0", "", {}, "sha512-D+zkORCbA9f1tdWRK0RaCR3GPv50cMxcrz4X8k5LTSUD1Dkw47mKJEZQNunItRTkWwgtaUSo1RVFRIG9ZXiFYg=="],
 
