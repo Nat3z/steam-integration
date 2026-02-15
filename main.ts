@@ -126,6 +126,107 @@ function setCachedData<T>(cacheFile: string, key: string, data: T): void {
   writeGenericCache(cacheFile, cache);
 }
 
+/**
+ * Clean up expired entries from a generic cache file
+ */
+function cleanupGenericCache<T>(cacheFile: string, cacheDuration: number = CACHE_DURATION_MS): number {
+  try {
+    if (!fs.existsSync(cacheFile)) {
+      return 0;
+    }
+    
+    const cache = readGenericCache<T>(cacheFile);
+    const now = Date.now();
+    let removedCount = 0;
+    
+    // Filter out expired entries
+    const cleanedCache: GenericCache<T> = {};
+    for (const [key, entry] of Object.entries(cache)) {
+      const age = now - entry.timestamp;
+      if (age < cacheDuration) {
+        cleanedCache[key] = entry;
+      } else {
+        removedCount++;
+      }
+    }
+    
+    // Only write if something changed
+    if (removedCount > 0) {
+      writeGenericCache(cacheFile, cleanedCache);
+      console.log(`Cleaned up ${removedCount} expired entries from ${cacheFile}`);
+    }
+    
+    return removedCount;
+  } catch (e) {
+    console.error(`Error cleaning up cache file ${cacheFile}:`, e);
+    return 0;
+  }
+}
+
+/**
+ * Clean up expired entries from update cache
+ */
+function cleanupUpdateCache(): number {
+  try {
+    if (!fs.existsSync(UPDATE_CACHE_FILE)) {
+      return 0;
+    }
+    
+    const cache = readUpdateCache();
+    const now = Date.now();
+    let removedCount = 0;
+    
+    // Filter out expired entries
+    const cleanedCache: UpdateCache = {};
+    for (const [appID, entry] of Object.entries(cache)) {
+      const age = now - entry.timestamp;
+      if (age < CACHE_DURATION_MS) {
+        cleanedCache[appID] = entry;
+      } else {
+        removedCount++;
+      }
+    }
+    
+    // Only write if something changed
+    if (removedCount > 0) {
+      writeUpdateCache(cleanedCache);
+      console.log(`Cleaned up ${removedCount} expired entries from update cache`);
+    }
+    
+    return removedCount;
+  } catch (e) {
+    console.error('Error cleaning up update cache:', e);
+    return 0;
+  }
+}
+
+/**
+ * Clean up all expired cache entries across all cache files
+ */
+function cleanupAllCaches(): void {
+  console.log('Starting cache cleanup...');
+  
+  let totalRemoved = 0;
+  
+  // Clean up update cache (24 hour expiration)
+  totalRemoved += cleanupUpdateCache();
+  
+  // Clean up Steam app info cache (24 hour expiration)
+  totalRemoved += cleanupGenericCache(STEAM_APP_INFO_CACHE_FILE, CACHE_DURATION_MS);
+  
+  // Clean up real game cache (24 hour expiration)
+  totalRemoved += cleanupGenericCache(REAL_GAME_CACHE_FILE, CACHE_DURATION_MS);
+  
+  // Clean up catalog cache (6 hour expiration)
+  totalRemoved += cleanupGenericCache<CatalogSection>(CATALOG_CACHE_FILE, CATALOG_CACHE_DURATION_MS);
+  
+  if (totalRemoved > 0) {
+    console.log(`Cache cleanup complete: removed ${totalRemoved} expired entries total`);
+  } else {
+    console.log('Cache cleanup complete: no expired entries found');
+  }
+}
+
 function getCachedUpdate(appID: number): UpdateCacheEntry | null {
   const cache = readUpdateCache();
   const entry = cache[appID.toString()];
@@ -668,6 +769,13 @@ addon.on('configure', (config) => config
       .setDescription('Clears all cached data (updates, games, app info, catalog).')
       .setTaskName('clearAllCaches')
   )
+  .addActionOption(action =>
+    action
+      .setName('cleanupExpiredCaches')
+      .setDisplayName('Clean Up Expired Caches')
+      .setDescription('Removes only expired cache entries based on their expiration time.')
+      .setTaskName('cleanupExpiredCaches')
+  )
 );
 
 addon.onTask('checkForUpdates', async (task) => {
@@ -711,10 +819,36 @@ addon.onTask('clearAllCaches', async (task) => {
   task.complete();
 });
 
+addon.onTask('cleanupExpiredCaches', async (task) => {
+  task.log('Cleaning up expired cache entries');
+  
+  // Run the cleanup
+  cleanupAllCaches();
+  
+  await task.askForInput('Expired Caches Cleaned', 'All expired cache entries have been removed. Valid cache entries are still preserved.', new ConfigurationBuilder());
+  task.complete();
+});
+
+// Cache cleanup interval (runs every hour)
+const CACHE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+let cacheCleanupInterval: NodeJS.Timeout | null = null;
+
 addon.on('connect', async () => {
   console.log('Steam integration connected');
   UPDATE_COOLDOWN_MS = addon.config.getNumberValue('update-cooldown') * 1000;
   console.log('Update cooldown set to ' + UPDATE_COOLDOWN_MS + 'ms');
+  
+  // Run initial cache cleanup on startup
+  cleanupAllCaches();
+  
+  // Set up periodic cache cleanup (runs every hour)
+  if (cacheCleanupInterval) {
+    clearInterval(cacheCleanupInterval);
+  }
+  cacheCleanupInterval = setInterval(() => {
+    cleanupAllCaches();
+  }, CACHE_CLEANUP_INTERVAL_MS);
+  console.log(`Cache cleanup scheduled to run every ${CACHE_CLEANUP_INTERVAL_MS / 1000 / 60} minutes`);
 });
 
 addon.on('library-search', (query, event) => {
@@ -1030,6 +1164,11 @@ addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => 
 });
 
 addon.on('disconnect', () => {
+  // Clean up the cache cleanup interval
+  if (cacheCleanupInterval) {
+    clearInterval(cacheCleanupInterval);
+    cacheCleanupInterval = null;
+  }
   process.exit(0);
 });
 
