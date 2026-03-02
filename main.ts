@@ -1,25 +1,34 @@
-import OGIAddon, { ConfigurationBuilder, type BasicLibraryInfo, type CatalogCarouselItem } from "ogi-addon";
+import OGIAddon, {
+  ConfigurationBuilder,
+  type BasicLibraryInfo,
+  type CatalogCarouselItem,
+} from "ogi-addon";
 import { join } from "path";
 import fs from "fs";
 import axios from "axios";
-import { type GameData, type SteamAppInfo, type SteamAppInfoResponse } from "./lib/types";
+import {
+  type GameData,
+  type SteamAppInfo,
+  type SteamAppInfoResponse,
+} from "./lib/types";
 
 const addon = new OGIAddon({
-  name: 'Steam Catalog',
-  version: '1.0.0',
-  id: 'steam-integration',
-  author: 'OGI Team',
-  description: 'An addon to integrate Steam store links into OpenGameInstaller',
-  repository: 'https://github.com/Nat3z/steam-integration',
-  storefronts: ['steam']
+  name: "Steam Catalog",
+  version: "1.0.0",
+  id: "steam-integration",
+  author: "OGI Team",
+  description: "An addon to integrate Steam store links into OpenGameInstaller",
+  repository: "https://github.com/Nat3z/steam-integration",
+  storefronts: ["steam"],
 });
 
-const BASE_ASSET_URL = (appID: number) => `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appID}/`;
-const CACHE_DIR = join(__dirname, '.cache');
-const UPDATE_CACHE_FILE = join(CACHE_DIR, 'update-cache.json');
-const STEAM_APP_INFO_CACHE_FILE = join(CACHE_DIR, 'steam-app-info.json');
-const REAL_GAME_CACHE_FILE = join(CACHE_DIR, 'real-game.json');
-const CATALOG_CACHE_FILE = join(CACHE_DIR, 'catalog.json');
+const BASE_ASSET_URL = (appID: number) =>
+  `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appID}/`;
+const CACHE_DIR = join(__dirname, ".cache");
+const UPDATE_CACHE_FILE = join(CACHE_DIR, "update-cache.json");
+const STEAM_APP_INFO_CACHE_FILE = join(CACHE_DIR, "steam-app-info.json");
+const REAL_GAME_CACHE_FILE = join(CACHE_DIR, "real-game.json");
+const CATALOG_CACHE_FILE = join(CACHE_DIR, "catalog.json");
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 const CATALOG_CACHE_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours in milliseconds
 let UPDATE_COOLDOWN_MS = 1500; // 1.5 seconds cooldown per game
@@ -61,11 +70,11 @@ type GenericCache<T> = {
 function readUpdateCache(): UpdateCache {
   try {
     if (fs.existsSync(UPDATE_CACHE_FILE)) {
-      const cacheData = fs.readFileSync(UPDATE_CACHE_FILE, 'utf-8');
+      const cacheData = fs.readFileSync(UPDATE_CACHE_FILE, "utf-8");
       return JSON.parse(cacheData);
     }
   } catch (e) {
-    console.error('Error reading update cache:', e);
+    console.error("Error reading update cache:", e);
   }
   return {};
 }
@@ -74,14 +83,14 @@ function writeUpdateCache(cache: UpdateCache): void {
   try {
     fs.writeFileSync(UPDATE_CACHE_FILE, JSON.stringify(cache, null, 2));
   } catch (e) {
-    console.error('Error writing update cache:', e);
+    console.error("Error writing update cache:", e);
   }
 }
 
 function readGenericCache<T>(cacheFile: string): GenericCache<T> {
   try {
     if (fs.existsSync(cacheFile)) {
-      const cacheData = fs.readFileSync(cacheFile, 'utf-8');
+      const cacheData = fs.readFileSync(cacheFile, "utf-8");
       return JSON.parse(cacheData);
     }
   } catch (e) {
@@ -98,14 +107,18 @@ function writeGenericCache<T>(cacheFile: string, cache: GenericCache<T>): void {
   }
 }
 
-function getCachedData<T>(cacheFile: string, key: string, cacheDuration: number = CACHE_DURATION_MS): T | null {
+function getCachedData<T>(
+  cacheFile: string,
+  key: string,
+  cacheDuration: number = CACHE_DURATION_MS,
+): T | null {
   const cache = readGenericCache<T>(cacheFile);
   const entry = cache[key];
-  
+
   if (!entry) {
     return null;
   }
-  
+
   const age = Date.now() - entry.timestamp;
   if (age >= cacheDuration) {
     // Cache expired, remove it
@@ -113,7 +126,7 @@ function getCachedData<T>(cacheFile: string, key: string, cacheDuration: number 
     writeGenericCache(cacheFile, cache);
     return null;
   }
-  
+
   return entry.data;
 }
 
@@ -121,7 +134,7 @@ function setCachedData<T>(cacheFile: string, key: string, data: T): void {
   const cache = readGenericCache<T>(cacheFile);
   cache[key] = {
     data,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
   writeGenericCache(cacheFile, cache);
 }
@@ -129,16 +142,19 @@ function setCachedData<T>(cacheFile: string, key: string, data: T): void {
 /**
  * Clean up expired entries from a generic cache file
  */
-function cleanupGenericCache<T>(cacheFile: string, cacheDuration: number = CACHE_DURATION_MS): number {
+function cleanupGenericCache<T>(
+  cacheFile: string,
+  cacheDuration: number = CACHE_DURATION_MS,
+): number {
   try {
     if (!fs.existsSync(cacheFile)) {
       return 0;
     }
-    
+
     const cache = readGenericCache<T>(cacheFile);
     const now = Date.now();
     let removedCount = 0;
-    
+
     // Filter out expired entries
     const cleanedCache: GenericCache<T> = {};
     for (const [key, entry] of Object.entries(cache)) {
@@ -149,13 +165,15 @@ function cleanupGenericCache<T>(cacheFile: string, cacheDuration: number = CACHE
         removedCount++;
       }
     }
-    
+
     // Only write if something changed
     if (removedCount > 0) {
       writeGenericCache(cacheFile, cleanedCache);
-      console.log(`Cleaned up ${removedCount} expired entries from ${cacheFile}`);
+      console.log(
+        `Cleaned up ${removedCount} expired entries from ${cacheFile}`,
+      );
     }
-    
+
     return removedCount;
   } catch (e) {
     console.error(`Error cleaning up cache file ${cacheFile}:`, e);
@@ -171,11 +189,11 @@ function cleanupUpdateCache(): number {
     if (!fs.existsSync(UPDATE_CACHE_FILE)) {
       return 0;
     }
-    
+
     const cache = readUpdateCache();
     const now = Date.now();
     let removedCount = 0;
-    
+
     // Filter out expired entries
     const cleanedCache: UpdateCache = {};
     for (const [appID, entry] of Object.entries(cache)) {
@@ -186,16 +204,18 @@ function cleanupUpdateCache(): number {
         removedCount++;
       }
     }
-    
+
     // Only write if something changed
     if (removedCount > 0) {
       writeUpdateCache(cleanedCache);
-      console.log(`Cleaned up ${removedCount} expired entries from update cache`);
+      console.log(
+        `Cleaned up ${removedCount} expired entries from update cache`,
+      );
     }
-    
+
     return removedCount;
   } catch (e) {
-    console.error('Error cleaning up update cache:', e);
+    console.error("Error cleaning up update cache:", e);
     return 0;
   }
 }
@@ -204,37 +224,45 @@ function cleanupUpdateCache(): number {
  * Clean up all expired cache entries across all cache files
  */
 function cleanupAllCaches(): void {
-  console.log('Starting cache cleanup...');
-  
+  console.log("Starting cache cleanup...");
+
   let totalRemoved = 0;
-  
+
   // Clean up update cache (24 hour expiration)
   totalRemoved += cleanupUpdateCache();
-  
+
   // Clean up Steam app info cache (24 hour expiration)
-  totalRemoved += cleanupGenericCache(STEAM_APP_INFO_CACHE_FILE, CACHE_DURATION_MS);
-  
+  totalRemoved += cleanupGenericCache(
+    STEAM_APP_INFO_CACHE_FILE,
+    CACHE_DURATION_MS,
+  );
+
   // Clean up real game cache (24 hour expiration)
   totalRemoved += cleanupGenericCache(REAL_GAME_CACHE_FILE, CACHE_DURATION_MS);
-  
+
   // Clean up catalog cache (6 hour expiration)
-  totalRemoved += cleanupGenericCache<CatalogSection>(CATALOG_CACHE_FILE, CATALOG_CACHE_DURATION_MS);
-  
+  totalRemoved += cleanupGenericCache<CatalogSection>(
+    CATALOG_CACHE_FILE,
+    CATALOG_CACHE_DURATION_MS,
+  );
+
   if (totalRemoved > 0) {
-    console.log(`Cache cleanup complete: removed ${totalRemoved} expired entries total`);
+    console.log(
+      `Cache cleanup complete: removed ${totalRemoved} expired entries total`,
+    );
   } else {
-    console.log('Cache cleanup complete: no expired entries found');
+    console.log("Cache cleanup complete: no expired entries found");
   }
 }
 
 function getCachedUpdate(appID: number): UpdateCacheEntry | null {
   const cache = readUpdateCache();
   const entry = cache[appID.toString()];
-  
+
   if (!entry) {
     return null;
   }
-  
+
   const age = Date.now() - entry.timestamp;
   if (age >= CACHE_DURATION_MS) {
     // Cache expired, remove it
@@ -242,7 +270,7 @@ function getCachedUpdate(appID: number): UpdateCacheEntry | null {
     writeUpdateCache(cache);
     return null;
   }
-  
+
   return entry;
 }
 
@@ -250,7 +278,7 @@ function setCachedUpdate(appID: number, version: string): void {
   const cache = readUpdateCache();
   cache[appID.toString()] = {
     version,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
   writeUpdateCache(cache);
 }
@@ -259,7 +287,7 @@ let lastApiCallTime = new Map<number, number>();
 
 async function processUpdateCheck(request: UpdateCheckRequest): Promise<void> {
   const { appID, currentVersion, resolve, reject } = request;
-  
+
   // Cache check is done in queue processor, so we only get here if cache miss
   // Check if we need to wait for cooldown
   const lastCall = lastApiCallTime.get(appID);
@@ -268,29 +296,30 @@ async function processUpdateCheck(request: UpdateCheckRequest): Promise<void> {
     if (timeSinceLastCall < UPDATE_COOLDOWN_MS) {
       const waitTime = UPDATE_COOLDOWN_MS - timeSinceLastCall;
       console.log(`Cooldown active for appID ${appID}, waiting ${waitTime}ms`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
   }
-  
+
   // Make API call
   lastApiCallTime.set(appID, Date.now());
   const steamAppInfo = await getSteamAppInfo(appID);
-  
+
   if (!steamAppInfo) {
-    reject('Steam app info not found');
+    reject("Steam app info not found");
     return;
   }
-  
-  const version = steamAppInfo.data[appID].common.public_only === undefined
-    ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! 
-    : '1.0';
-  
+
+  const version =
+    steamAppInfo.data[appID].common.public_only === undefined
+      ? steamAppInfo?.data[appID].depots.branches!["public"].buildid!
+      : "1.0";
+
   // Cache the result
   setCachedUpdate(appID, version);
-  
+
   resolve({
     version,
-    available: version !== currentVersion
+    available: version !== currentVersion,
   });
 }
 
@@ -299,45 +328,49 @@ async function processUpdateQueue(appID: number): Promise<void> {
   if (queueProcessors.get(appID)) {
     return; // Already processing
   }
-  
+
   queueProcessors.set(appID, true);
-  
+
   try {
     while (true) {
       const queue = updateQueues.get(appID);
       if (!queue || queue.length === 0) {
         break; // Queue is empty, we're done
       }
-      
+
       // Process the first request in the queue
       const request = queue.shift()!;
       let madeApiCall = false;
-      
+
       try {
         // Check cache first - if cached, serve immediately without API call
         const cachedUpdate = getCachedUpdate(appID);
         if (cachedUpdate) {
-          console.log(`Using cached update info for ${appID} (version: ${cachedUpdate.version})`);
+          console.log(
+            `Using cached update info for ${appID} (version: ${cachedUpdate.version})`,
+          );
           console.log(`Request current version: ${request.currentVersion}`);
-          console.log(`Request available: ${cachedUpdate.version !== request.currentVersion}`);
+          console.log(
+            `Request available: ${cachedUpdate.version !== request.currentVersion}`,
+          );
           request.resolve({
             version: cachedUpdate.version,
-            available: cachedUpdate.version !== request.currentVersion
+            available: cachedUpdate.version !== request.currentVersion,
           });
           // No API call made, continue to next item immediately
           continue;
         }
-        
+
         // Cache miss - need to make API call
         madeApiCall = true;
         await processUpdateCheck(request);
       } catch (error) {
-        request.reject(typeof error === 'string' ? error : 'Unknown error');
+        request.reject(typeof error === "string" ? error : "Unknown error");
       }
-      
+
       // Only wait for cooldown if we made an API call and there are more requests
       if (madeApiCall && queue.length > 0) {
-        await new Promise(resolve => setTimeout(resolve, UPDATE_COOLDOWN_MS));
+        await new Promise((resolve) => setTimeout(resolve, UPDATE_COOLDOWN_MS));
       }
     }
   } finally {
@@ -347,22 +380,25 @@ async function processUpdateQueue(appID: number): Promise<void> {
   }
 }
 
-function queueUpdateCheck(appID: number, currentVersion: string): Promise<{ version: string; available: boolean }> {
+function queueUpdateCheck(
+  appID: number,
+  currentVersion: string,
+): Promise<{ version: string; available: boolean }> {
   return new Promise((resolve, reject) => {
     // Add request to queue
     if (!updateQueues.has(appID)) {
       updateQueues.set(appID, []);
     }
-    
+
     updateQueues.get(appID)!.push({
       appID,
       currentVersion,
       resolve,
-      reject
+      reject,
     });
-    
+
     // Start processing if not already processing
-    processUpdateQueue(appID).catch(error => {
+    processUpdateQueue(appID).catch((error) => {
       console.error(`Error processing update queue for ${appID}:`, error);
     });
   });
@@ -371,33 +407,38 @@ function queueUpdateCheck(appID: number, currentVersion: string): Promise<{ vers
 function stringSimilarity(a: string, b: string): number {
   // Normalize and clean the strings
   const normalize = (str: string): string => {
-    return str
-      .toLowerCase()
-      // Remove trademark symbols (™, ®, ©, etc.)
-      .replace(/[™®©℠]/g, '')
-      // Remove year patterns like (2023), [2024], etc.
-      .replace(/[\(\[\{]\d{4}[\)\]\}]/g, '')
-      // Remove common gaming suffixes and prefixes
-      .replace(/\s+(premium|deluxe|gold|ultimate|complete|goty|game\s+of\s+the\s+year|enhanced|definitive|remastered|directors?\s+cut|collectors?\s+edition|special\s+edition|digital\s+edition)\s*(edition)?/gi, '')
-      // Remove "the" at the beginning for better matching
-      .replace(/^the\s+/i, '')
-      // Normalize Roman numerals to Arabic numbers for better matching
-      .replace(/\biv\b/gi, '4')
-      .replace(/\biii\b/gi, '3') 
-      .replace(/\bii\b/gi, '2')
-      .replace(/\bvi\b/gi, '6')
-      .replace(/\bvii\b/gi, '7')
-      .replace(/\bviii\b/gi, '8')
-      .replace(/\bix\b/gi, '9')
-      .replace(/\bxi\b/gi, '11')
-      .replace(/\bxii\b/gi, '12')
-      // Handle common abbreviations
-      .replace(/\b&\b/g, 'and')
-      .replace(/\bvs\b/gi, 'versus')
-      // Clean up extra whitespace and punctuation
-      .replace(/[^\w\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    return (
+      str
+        .toLowerCase()
+        // Remove trademark symbols (™, ®, ©, etc.)
+        .replace(/[™®©℠]/g, "")
+        // Remove year patterns like (2023), [2024], etc.
+        .replace(/[\(\[\{]\d{4}[\)\]\}]/g, "")
+        // Remove common gaming suffixes and prefixes
+        .replace(
+          /\s+(premium|deluxe|gold|ultimate|complete|goty|game\s+of\s+the\s+year|enhanced|definitive|remastered|directors?\s+cut|collectors?\s+edition|special\s+edition|digital\s+edition)\s*(edition)?/gi,
+          "",
+        )
+        // Remove "the" at the beginning for better matching
+        .replace(/^the\s+/i, "")
+        // Normalize Roman numerals to Arabic numbers for better matching
+        .replace(/\biv\b/gi, "4")
+        .replace(/\biii\b/gi, "3")
+        .replace(/\bii\b/gi, "2")
+        .replace(/\bvi\b/gi, "6")
+        .replace(/\bvii\b/gi, "7")
+        .replace(/\bviii\b/gi, "8")
+        .replace(/\bix\b/gi, "9")
+        .replace(/\bxi\b/gi, "11")
+        .replace(/\bxii\b/gi, "12")
+        // Handle common abbreviations
+        .replace(/\b&\b/g, "and")
+        .replace(/\bvs\b/gi, "versus")
+        // Clean up extra whitespace and punctuation
+        .replace(/[^\w\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    );
   };
 
   const cleanA = normalize(a);
@@ -407,15 +448,31 @@ function stringSimilarity(a: string, b: string): number {
   if (cleanA === cleanB) return 1;
 
   // Split into words for word-level matching
-  const wordsA = cleanA.split(/\s+/).filter(word => word.length > 1); // Filter out single characters
-  const wordsB = cleanB.split(/\s+/).filter(word => word.length > 1);
+  const wordsA = cleanA.split(/\s+/).filter((word) => word.length > 1); // Filter out single characters
+  const wordsB = cleanB.split(/\s+/).filter((word) => word.length > 1);
 
   if (wordsA.length === 0 || wordsB.length === 0) return 0;
 
   // Filter out extremely common words that shouldn't contribute much to similarity
-  const commonWords = new Set(['the', 'of', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'with', 'by']);
-  const significantWordsA = wordsA.filter(word => !commonWords.has(word) || word.length > 4);
-  const significantWordsB = wordsB.filter(word => !commonWords.has(word) || word.length > 4);
+  const commonWords = new Set([
+    "the",
+    "of",
+    "and",
+    "or",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "with",
+    "by",
+  ]);
+  const significantWordsA = wordsA.filter(
+    (word) => !commonWords.has(word) || word.length > 4,
+  );
+  const significantWordsB = wordsB.filter(
+    (word) => !commonWords.has(word) || word.length > 4,
+  );
 
   // If no significant words remain, fall back to all words but with lower threshold
   const finalWordsA = significantWordsA.length > 0 ? significantWordsA : wordsA;
@@ -430,56 +487,65 @@ function stringSimilarity(a: string, b: string): number {
   for (const wordA of finalWordsA) {
     let bestMatch = 0;
     let bestMatchIndex = -1;
-    let matchType = 'none';
+    let matchType = "none";
 
     for (let i = 0; i < finalWordsB.length; i++) {
       if (usedWordsB.has(i)) continue;
 
       const wordB = finalWordsB[i];
-      
+
       // Exact word match
       if (wordA === wordB) {
         exactMatches++;
         usedWordsB.add(i);
         bestMatchIndex = i;
-        matchType = 'exact';
+        matchType = "exact";
         break;
       }
 
       // Check for substring matches (useful for abbreviated titles) - but more strict
       if (wordA.length >= 4 && wordB.length >= 4) {
         if (wordA.includes(wordB) || wordB.includes(wordA)) {
-          const similarity = Math.min(wordA.length, wordB.length) / Math.max(wordA.length, wordB.length);
-          if (similarity > bestMatch && similarity > 0.8) { // Increased threshold
+          const similarity =
+            Math.min(wordA.length, wordB.length) /
+            Math.max(wordA.length, wordB.length);
+          if (similarity > bestMatch && similarity > 0.8) {
+            // Increased threshold
             bestMatch = similarity;
             bestMatchIndex = i;
-            matchType = 'strong';
+            matchType = "strong";
           }
         }
       }
 
       // Fuzzy character overlap matching - stricter threshold
       const overlap = calculateJaccardSimilarity(wordA, wordB);
-      if (overlap > bestMatch && overlap > 0.75) { // Increased threshold
+      if (overlap > bestMatch && overlap > 0.75) {
+        // Increased threshold
         bestMatch = overlap;
         bestMatchIndex = i;
-        matchType = 'strong';
+        matchType = "strong";
       }
 
       // Levenshtein-based similarity for close matches - stricter threshold
       const levenshtein = calculateLevenshteinSimilarity(wordA, wordB);
-      if (levenshtein > bestMatch && levenshtein > 0.8) { // Increased threshold
+      if (levenshtein > bestMatch && levenshtein > 0.8) {
+        // Increased threshold
         bestMatch = levenshtein;
         bestMatchIndex = i;
-        matchType = levenshtein > 0.9 ? 'strong' : 'weak';
+        matchType = levenshtein > 0.9 ? "strong" : "weak";
       }
     }
 
     // Categorize matches by strength
-    if (bestMatchIndex !== -1 && !usedWordsB.has(bestMatchIndex) && bestMatch > 0) {
-      if (matchType === 'strong') {
+    if (
+      bestMatchIndex !== -1 &&
+      !usedWordsB.has(bestMatchIndex) &&
+      bestMatch > 0
+    ) {
+      if (matchType === "strong") {
         strongPartialMatches += bestMatch;
-      } else if (matchType === 'weak') {
+      } else if (matchType === "weak") {
         weakPartialMatches += bestMatch * 0.5; // Heavily penalize weak matches
       }
       usedWordsB.add(bestMatchIndex);
@@ -491,49 +557,59 @@ function stringSimilarity(a: string, b: string): number {
   const exactScore = exactMatches / totalWords;
   const strongPartialScore = (strongPartialMatches / totalWords) * 0.7; // Reduced weight
   const weakPartialScore = (weakPartialMatches / totalWords) * 0.3; // Very low weight
-  
+
   // Require minimum number of matches for longer queries
-  const minWordsMatched = exactMatches + Math.floor(strongPartialMatches) + Math.floor(weakPartialMatches);
+  const minWordsMatched =
+    exactMatches +
+    Math.floor(strongPartialMatches) +
+    Math.floor(weakPartialMatches);
   const minRequiredMatches = Math.min(2, Math.floor(finalWordsA.length * 0.6)); // At least 60% of words should match
-  
+
   if (minWordsMatched < minRequiredMatches) {
     return 0; // Not enough matches, return 0
   }
 
   // Bonus for length similarity (helps with abbreviated vs full titles) - reduced
-  const lengthSimilarity = Math.min(cleanA.length, cleanB.length) / Math.max(cleanA.length, cleanB.length);
+  const lengthSimilarity =
+    Math.min(cleanA.length, cleanB.length) /
+    Math.max(cleanA.length, cleanB.length);
   const lengthBonus = lengthSimilarity * 0.05; // Reduced bonus
-  
-  const totalScore = exactScore + strongPartialScore + weakPartialScore + lengthBonus;
-  
+
+  const totalScore =
+    exactScore + strongPartialScore + weakPartialScore + lengthBonus;
+
   // Apply stricter threshold - require higher minimum score
   return totalScore < 0.3 ? 0 : Math.min(1, totalScore);
 
   function calculateJaccardSimilarity(str1: string, str2: string): number {
     if (str1.length < 2 || str2.length < 2) return str1 === str2 ? 1 : 0;
-    
+
     const shingles1 = new Set<string>();
     const shingles2 = new Set<string>();
-    
+
     // Use character trigrams for better accuracy
     const shingleSize = Math.min(3, Math.min(str1.length, str2.length));
-    
+
     for (let i = 0; i <= str1.length - shingleSize; i++) {
       shingles1.add(str1.substring(i, i + shingleSize));
     }
-    
+
     for (let i = 0; i <= str2.length - shingleSize; i++) {
       shingles2.add(str2.substring(i, i + shingleSize));
     }
-    
-    const intersection = [...shingles1].filter(sh => shingles2.has(sh)).length;
+
+    const intersection = [...shingles1].filter((sh) =>
+      shingles2.has(sh),
+    ).length;
     const union = shingles1.size + shingles2.size - intersection;
-    
+
     return union > 0 ? intersection / union : 0;
   }
 
   function calculateLevenshteinSimilarity(str1: string, str2: string): number {
-    const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
+    const matrix = Array(str2.length + 1)
+      .fill(null)
+      .map(() => Array(str1.length + 1).fill(null));
 
     for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
     for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
@@ -544,7 +620,7 @@ function stringSimilarity(a: string, b: string): number {
         matrix[j][i] = Math.min(
           matrix[j][i - 1] + 1, // deletion
           matrix[j - 1][i] + 1, // insertion
-          matrix[j - 1][i - 1] + substitutionCost // substitution
+          matrix[j - 1][i - 1] + substitutionCost, // substitution
         );
       }
     }
@@ -556,20 +632,26 @@ function stringSimilarity(a: string, b: string): number {
 }
 
 // store it in filesystem cache if cached is true
-async function getSteamAppInfo(appID: number, cached?: boolean): Promise<SteamAppInfoResponse | undefined> {
+async function getSteamAppInfo(
+  appID: number,
+  cached?: boolean,
+): Promise<SteamAppInfoResponse | undefined> {
   try {
     if (cached) {
-      const cachedData = getCachedData<SteamAppInfoResponse>(STEAM_APP_INFO_CACHE_FILE, appID.toString());
+      const cachedData = getCachedData<SteamAppInfoResponse>(
+        STEAM_APP_INFO_CACHE_FILE,
+        appID.toString(),
+      );
       if (cachedData) {
         console.log(`Using cached Steam app info for ${appID}`);
         return cachedData;
       }
     }
     const response = await axios<SteamAppInfoResponse>({
-      url: `https://api.steamcmd.net/v1/info/${appID}`,
+      url: `https://steamcmdapi.nat3z.com/v1/info/${appID}`,
       headers: {
-        'User-Agent': 'OGI Steam-Integration/1.0.0'
-      }
+        "User-Agent": "OGI Steam-Integration/1.0.0",
+      },
     });
     if (cached) {
       setCachedData(STEAM_APP_INFO_CACHE_FILE, appID.toString(), response.data);
@@ -582,57 +664,64 @@ async function getSteamAppInfo(appID: number, cached?: boolean): Promise<SteamAp
   }
 }
 
-function calculateSortScore(title: string, query: string, baseSimilarity: number): number {
+function calculateSortScore(
+  title: string,
+  query: string,
+  baseSimilarity: number,
+): number {
   const normalizeForSort = (str: string): string => {
     return str
       .toLowerCase()
-      .replace(/[™®©℠]/g, '')
-      .replace(/[\(\[\{]\d{4}[\)\]\}]/g, '')
-      .replace(/\s+(premium|deluxe|gold|ultimate|complete|goty|game\s+of\s+the\s+year|enhanced|definitive|remastered|directors?\s+cut|collectors?\s+edition|special\s+edition|digital\s+edition)\s*(edition)?/gi, '')
-      .replace(/^the\s+/i, '')
-      .replace(/[^\w\s]/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/[™®©℠]/g, "")
+      .replace(/[\(\[\{]\d{4}[\)\]\}]/g, "")
+      .replace(
+        /\s+(premium|deluxe|gold|ultimate|complete|goty|game\s+of\s+the\s+year|enhanced|definitive|remastered|directors?\s+cut|collectors?\s+edition|special\s+edition|digital\s+edition)\s*(edition)?/gi,
+        "",
+      )
+      .replace(/^the\s+/i, "")
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
   };
 
   const cleanTitle = normalizeForSort(title);
   const cleanQuery = normalizeForSort(query);
-  
+
   let sortScore = baseSimilarity;
-  
+
   // Bonus for exact title match (after normalization)
   if (cleanTitle === cleanQuery) {
     return 1.0;
   }
-  
+
   // Bonus for title starting with query (strong indicator of main game vs spin-off)
   if (cleanTitle.startsWith(cleanQuery)) {
     sortScore += 0.3;
   }
-  
+
   // Bonus for query being a complete substring of title
   if (cleanTitle.includes(cleanQuery)) {
     sortScore += 0.2;
   }
-  
+
   // Split into words for more detailed analysis
   const titleWords = cleanTitle.split(/\s+/);
   const queryWords = cleanQuery.split(/\s+/);
-  
+
   // Bonus for maintaining word order (important for sequels)
   let orderBonus = 0;
   let lastFoundIndex = -1;
   let consecutiveMatches = 0;
-  
+
   for (const queryWord of queryWords) {
-    const foundIndex = titleWords.findIndex((titleWord, index) => 
-      index > lastFoundIndex && (
-        titleWord === queryWord || 
-        titleWord.includes(queryWord) || 
-        queryWord.includes(titleWord)
-      )
+    const foundIndex = titleWords.findIndex(
+      (titleWord, index) =>
+        index > lastFoundIndex &&
+        (titleWord === queryWord ||
+          titleWord.includes(queryWord) ||
+          queryWord.includes(titleWord)),
     );
-    
+
     if (foundIndex !== -1) {
       if (foundIndex === lastFoundIndex + 1) {
         consecutiveMatches++;
@@ -640,70 +729,98 @@ function calculateSortScore(title: string, query: string, baseSimilarity: number
       lastFoundIndex = foundIndex;
     }
   }
-  
+
   orderBonus = (consecutiveMatches / Math.max(queryWords.length, 1)) * 0.2;
   sortScore += orderBonus;
-  
+
   // Special handling for numbers and Roman numerals (important for game series)
   const numberPattern = /\b(\d+|iv|iii|ii|vi|vii|viii|ix|xi|xii|v)\b/gi;
   const queryNumbers = cleanQuery.match(numberPattern) || [];
   const titleNumbers = cleanTitle.match(numberPattern) || [];
-  
+
   if (queryNumbers.length > 0) {
     // Normalize Roman numerals for comparison
     const normalizeNumber = (num: string): string => {
       const romanMap: { [key: string]: string } = {
-        'iv': '4', 'iii': '3', 'ii': '2', 'vi': '6', 'vii': '7', 
-        'viii': '8', 'ix': '9', 'xi': '11', 'xii': '12', 'v': '5'
+        iv: "4",
+        iii: "3",
+        ii: "2",
+        vi: "6",
+        vii: "7",
+        viii: "8",
+        ix: "9",
+        xi: "11",
+        xii: "12",
+        v: "5",
       };
       return romanMap[num.toLowerCase()] || num;
     };
-    
+
     const normalizedQueryNumbers = queryNumbers.map(normalizeNumber);
     const normalizedTitleNumbers = titleNumbers.map(normalizeNumber);
-    
+
     // Exact number match bonus
-    const numberMatches = normalizedQueryNumbers.filter(qNum => 
-      normalizedTitleNumbers.includes(qNum)
+    const numberMatches = normalizedQueryNumbers.filter((qNum) =>
+      normalizedTitleNumbers.includes(qNum),
     ).length;
-    
+
     if (numberMatches === queryNumbers.length && numberMatches > 0) {
       sortScore += 0.25; // Strong bonus for exact number/numeral matches
     }
-    
+
     // Penalty for titles with different numbers (likely different games in series)
-    const hasConflictingNumbers = normalizedTitleNumbers.some(tNum => 
-      normalizedQueryNumbers.length > 0 && 
-      !normalizedQueryNumbers.includes(tNum) && 
-      /^\d+$/.test(tNum)
+    const hasConflictingNumbers = normalizedTitleNumbers.some(
+      (tNum) =>
+        normalizedQueryNumbers.length > 0 &&
+        !normalizedQueryNumbers.includes(tNum) &&
+        /^\d+$/.test(tNum),
     );
-    
+
     if (hasConflictingNumbers) {
       sortScore -= 0.3; // Penalty for conflicting numbers
     }
   }
-  
+
   // Penalty for generic terms that might indicate spin-offs
-  const genericTerms = ['online', 'mobile', 'legends', 'heroes', 'chronicles', 'tales', 'stories', 'collection'];
-  const titleHasGeneric = genericTerms.some(term => cleanTitle.includes(term));
-  const queryHasGeneric = genericTerms.some(term => cleanQuery.includes(term));
-  
+  const genericTerms = [
+    "online",
+    "mobile",
+    "legends",
+    "heroes",
+    "chronicles",
+    "tales",
+    "stories",
+    "collection",
+  ];
+  const titleHasGeneric = genericTerms.some((term) =>
+    cleanTitle.includes(term),
+  );
+  const queryHasGeneric = genericTerms.some((term) =>
+    cleanQuery.includes(term),
+  );
+
   if (titleHasGeneric && !queryHasGeneric) {
     sortScore -= 0.15; // Penalty for spin-offs when not specifically searched
   }
-  
+
   // Length penalty for overly long titles (often special editions or bundles)
   const lengthRatio = cleanTitle.length / cleanQuery.length;
   if (lengthRatio > 2.5) {
     sortScore -= 0.1;
   }
-  
+
   return Math.max(0, Math.min(1, sortScore));
 }
 
-async function getRealGame(titleId: number, cached?: boolean): Promise<GameData | undefined> {
+async function getRealGame(
+  titleId: number,
+  cached?: boolean,
+): Promise<GameData | undefined> {
   if (cached) {
-    const cachedData = getCachedData<GameData>(REAL_GAME_CACHE_FILE, titleId.toString());
+    const cachedData = getCachedData<GameData>(
+      REAL_GAME_CACHE_FILE,
+      titleId.toString(),
+    );
     if (cachedData) {
       console.log(`Using cached game data for ${titleId}`);
       return cachedData;
@@ -713,15 +830,19 @@ async function getRealGame(titleId: number, cached?: boolean): Promise<GameData 
   await new Promise((resolve) => setTimeout(resolve, 200));
   try {
     const response = await axios({
-      method: 'GET',
+      method: "GET",
       url: `https://store.steampowered.com/api/appdetails?appids=${titleId}&cc=us`,
     });
     if (!response.data[titleId].success) {
       return undefined;
     }
-    if (response.data[titleId].data.type === 'game') {
+    if (response.data[titleId].data.type === "game") {
       if (cached) {
-        setCachedData(REAL_GAME_CACHE_FILE, titleId.toString(), response.data[titleId].data);
+        setCachedData(
+          REAL_GAME_CACHE_FILE,
+          titleId.toString(),
+          response.data[titleId].data,
+        );
         console.log(`Cached game data for ${titleId}`);
       }
       return response.data[titleId].data;
@@ -734,63 +855,76 @@ async function getRealGame(titleId: number, cached?: boolean): Promise<GameData 
   }
 }
 
-addon.on('configure', (config) => config
-  .addNumberOption(option => 
-    option
-      .setName('steam-limit')
-      .setDisplayName('Steam Search Limit')
-      .setDescription('The amount of steam apps that can be searched for at once. More results means more time to search.')
-      .setMin(1)
-      .setMax(100)
-      .setDefaultValue(5)
-      .setInputType('range')
-  )
-  .addNumberOption(option =>
-    option
-      .setName('update-cooldown')
-      .setDisplayName('Update Cooldown')
-      .setDescription('The amount of time in seconds to wait between game checks.')
-      .setMin(1)
-      .setMax(10)
-      .setDefaultValue(1)
-      .setInputType('range')
-  )
-  .addActionOption(action =>
-    action
-      .setName('checkForUpdates')
-      .setDisplayName('Delete Cached Checks for Updates')
-      .setDescription('Clears all cached checks for updates.')
-      .setTaskName('checkForUpdates')
-  )
-  .addActionOption(action =>
-    action
-      .setName('clearAllCaches')
-      .setDisplayName('Clear All Caches')
-      .setDescription('Clears all cached data (updates, games, app info, catalog).')
-      .setTaskName('clearAllCaches')
-  )
-  .addActionOption(action =>
-    action
-      .setName('cleanupExpiredCaches')
-      .setDisplayName('Clean Up Expired Caches')
-      .setDescription('Removes only expired cache entries based on their expiration time.')
-      .setTaskName('cleanupExpiredCaches')
-  )
+addon.on("configure", (config) =>
+  config
+    .addNumberOption((option) =>
+      option
+        .setName("steam-limit")
+        .setDisplayName("Steam Search Limit")
+        .setDescription(
+          "The amount of steam apps that can be searched for at once. More results means more time to search.",
+        )
+        .setMin(1)
+        .setMax(100)
+        .setDefaultValue(5)
+        .setInputType("range"),
+    )
+    .addNumberOption((option) =>
+      option
+        .setName("update-cooldown")
+        .setDisplayName("Update Cooldown")
+        .setDescription(
+          "The amount of time in seconds to wait between game checks.",
+        )
+        .setMin(1)
+        .setMax(10)
+        .setDefaultValue(1)
+        .setInputType("range"),
+    )
+    .addActionOption((action) =>
+      action
+        .setName("checkForUpdates")
+        .setDisplayName("Delete Cached Checks for Updates")
+        .setDescription("Clears all cached checks for updates.")
+        .setTaskName("checkForUpdates"),
+    )
+    .addActionOption((action) =>
+      action
+        .setName("clearAllCaches")
+        .setDisplayName("Clear All Caches")
+        .setDescription(
+          "Clears all cached data (updates, games, app info, catalog).",
+        )
+        .setTaskName("clearAllCaches"),
+    )
+    .addActionOption((action) =>
+      action
+        .setName("cleanupExpiredCaches")
+        .setDisplayName("Clean Up Expired Caches")
+        .setDescription(
+          "Removes only expired cache entries based on their expiration time.",
+        )
+        .setTaskName("cleanupExpiredCaches"),
+    ),
 );
 
-addon.onTask('checkForUpdates', async (task) => {
-  task.log('Checking for game updates');
+addon.onTask("checkForUpdates", async (task) => {
+  task.log("Checking for game updates");
   updateQueues.clear();
   lastApiCallTime.clear();
 
   // clear the update cache
   fs.writeFileSync(UPDATE_CACHE_FILE, JSON.stringify({}, null, 2));
-  await task.askForInput('All Cached Updates Cleared', 'All checks for updates have been cleared. To re-run a check for updates, restart the addon server by going to Settings > General > Restart Addon Server.', new ConfigurationBuilder());
+  await task.askForInput(
+    "All Cached Updates Cleared",
+    "All checks for updates have been cleared. To re-run a check for updates, restart the addon server by going to Settings > General > Restart Addon Server.",
+    new ConfigurationBuilder(),
+  );
   task.complete();
 });
 
-addon.onTask('clearAllCaches', async (task) => {
-  task.log('Clearing all caches');
+addon.onTask("clearAllCaches", async (task) => {
+  task.log("Clearing all caches");
   updateQueues.clear();
   lastApiCallTime.clear();
 
@@ -800,7 +934,7 @@ addon.onTask('clearAllCaches', async (task) => {
     STEAM_APP_INFO_CACHE_FILE,
     REAL_GAME_CACHE_FILE,
     CATALOG_CACHE_FILE,
-    RESOLVED_10_FILE_VERSIONS_FILE
+    RESOLVED_10_FILE_VERSIONS_FILE,
   ];
 
   for (const cacheFile of cacheFiles) {
@@ -815,17 +949,25 @@ addon.onTask('clearAllCaches', async (task) => {
   // Clear the in-memory resolved versions cache as well
   resolved10FileVersions = {};
 
-  await task.askForInput('All Caches Cleared', 'All cached data has been cleared. To see fresh data, restart the addon server by going to Settings > General > Restart Addon Server.', new ConfigurationBuilder());
+  await task.askForInput(
+    "All Caches Cleared",
+    "All cached data has been cleared. To see fresh data, restart the addon server by going to Settings > General > Restart Addon Server.",
+    new ConfigurationBuilder(),
+  );
   task.complete();
 });
 
-addon.onTask('cleanupExpiredCaches', async (task) => {
-  task.log('Cleaning up expired cache entries');
-  
+addon.onTask("cleanupExpiredCaches", async (task) => {
+  task.log("Cleaning up expired cache entries");
+
   // Run the cleanup
   cleanupAllCaches();
-  
-  await task.askForInput('Expired Caches Cleaned', 'All expired cache entries have been removed. Valid cache entries are still preserved.', new ConfigurationBuilder());
+
+  await task.askForInput(
+    "Expired Caches Cleaned",
+    "All expired cache entries have been removed. Valid cache entries are still preserved.",
+    new ConfigurationBuilder(),
+  );
   task.complete();
 });
 
@@ -833,14 +975,14 @@ addon.onTask('cleanupExpiredCaches', async (task) => {
 const CACHE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 let cacheCleanupInterval: NodeJS.Timeout | null = null;
 
-addon.on('connect', async () => {
-  console.log('Steam integration connected');
-  UPDATE_COOLDOWN_MS = addon.config.getNumberValue('update-cooldown') * 1000;
-  console.log('Update cooldown set to ' + UPDATE_COOLDOWN_MS + 'ms');
-  
+addon.on("connect", async () => {
+  console.log("Steam integration connected");
+  UPDATE_COOLDOWN_MS = addon.config.getNumberValue("update-cooldown") * 1000;
+  console.log("Update cooldown set to " + UPDATE_COOLDOWN_MS + "ms");
+
   // Run initial cache cleanup on startup
   cleanupAllCaches();
-  
+
   // Set up periodic cache cleanup (runs every hour)
   if (cacheCleanupInterval) {
     clearInterval(cacheCleanupInterval);
@@ -848,78 +990,98 @@ addon.on('connect', async () => {
   cacheCleanupInterval = setInterval(() => {
     cleanupAllCaches();
   }, CACHE_CLEANUP_INTERVAL_MS);
-  console.log(`Cache cleanup scheduled to run every ${CACHE_CLEANUP_INTERVAL_MS / 1000 / 60} minutes`);
+  console.log(
+    `Cache cleanup scheduled to run every ${CACHE_CLEANUP_INTERVAL_MS / 1000 / 60} minutes`,
+  );
 });
 
-addon.on('library-search', (query, event) => {
+addon.on("library-search", (query, event) => {
   event.defer(async () => {
     try {
       const results = await axios<SteamResult>({
-        url: `https://store.steampowered.com/search/results/?term=${encodeURI(query)}&category1=${encodeURI('998,994')}&ignore_preferences=1&cc=us&json=1`,
+        url: `https://store.steampowered.com/search/results/?term=${encodeURI(query)}&category1=${encodeURI("998,994")}&ignore_preferences=1&cc=us&json=1`,
         headers: {
-          'User-Agent': 'OGI Steam-Integration/1.0.0'
-        }
+          "User-Agent": "OGI Steam-Integration/1.0.0",
+        },
       });
       event.resolve(
         results.data.items
-          .map(result => {
+          .map((result) => {
             const match = result.logo.match(/apps\/(\d+)/);
             if (!match) {
               return null;
             }
             const appID = parseInt(match[1]);
             const similarity = stringSimilarity(result.name, query);
-            const sortScore = calculateSortScore(result.name, query, similarity);
+            const sortScore = calculateSortScore(
+              result.name,
+              query,
+              similarity,
+            );
             return {
               appID: appID,
               name: result.name,
-              storefront: 'steam',
+              storefront: "steam",
               capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${appID}/header.jpg`,
               similarity: similarity,
-              sortScore: sortScore
-            }
+              sortScore: sortScore,
+            };
           })
-          .filter(result => result && result.similarity >= 0.1)
+          .filter((result) => result && result.similarity >= 0.1)
           .sort((a, b) => b!.sortScore - a!.sortScore) // sort by enhanced sort score
           .map((res) => {
             const { similarity, sortScore, ...rest } = res!;
             return rest;
-          }) // remove similarity and sortScore from final result
+          }), // remove similarity and sortScore from final result
       );
     } catch (e) {
-      event.fail('Failed to search Steam');
+      event.fail("Failed to search Steam");
       return;
     }
-    
   });
 });
 
-addon.on('game-details', ({ appID, storefront }, event) => {
+addon.on("game-details", ({ appID, storefront }, event) => {
   event.defer(async () => {
     const realGame = await getRealGame(appID);
     if (realGame) {
       const steamAppInfo = await getSteamAppInfo(realGame.steam_appid);
       if (!steamAppInfo) {
-        event.fail('Steam app info not found');
-        console.error('Steam app info not found for ' + realGame.steam_appid);
+        event.fail("Steam app info not found");
+        console.error("Steam app info not found for " + realGame.steam_appid);
         return;
       }
       if (!steamAppInfo.data[realGame.steam_appid]) {
-        event.fail('Steam app info not found');
-        console.error('Steam app info not found for ' + realGame.steam_appid);
+        event.fail("Steam app info not found");
+        console.error("Steam app info not found for " + realGame.steam_appid);
         return;
       }
 
-      const assets = steamAppInfo.data[realGame.steam_appid].common.library_assets_full;
+      const assets =
+        steamAppInfo.data[realGame.steam_appid].common.library_assets_full;
       // Helper function: get image by language, defaulting to English, else first available
       const baseAssetUrl = BASE_ASSET_URL(realGame.steam_appid);
       function getAssetImage(assetData?: { image?: Record<string, string> }) {
         if (!assetData?.image) return undefined;
-        return baseAssetUrl + (assetData.image['english'] ?? assetData.image[Object.keys(assetData.image)[0]]);
+        return (
+          baseAssetUrl +
+          (assetData.image["english"] ??
+            assetData.image[Object.keys(assetData.image)[0]])
+        );
       }
-      const libraryHero = getAssetImage(assets?.library_hero) ?? baseAssetUrl + 'library_hero.jpg';
-      const libraryCapsule = getAssetImage(assets?.library_capsule) ?? baseAssetUrl + 'library_600x900_2x.jpg';
-      console.log(appID, 'is public only?', steamAppInfo.data[realGame.steam_appid].common.public_only === '1' ? 'yes' : 'no');
+      const libraryHero =
+        getAssetImage(assets?.library_hero) ??
+        baseAssetUrl + "library_hero.jpg";
+      const libraryCapsule =
+        getAssetImage(assets?.library_capsule) ??
+        baseAssetUrl + "library_600x900_2x.jpg";
+      console.log(
+        appID,
+        "is public only?",
+        steamAppInfo.data[realGame.steam_appid].common.public_only === "1"
+          ? "yes"
+          : "no",
+      );
 
       event.resolve({
         appID: realGame.steam_appid,
@@ -932,48 +1094,66 @@ addon.on('game-details', ({ appID, storefront }, event) => {
         coverImage: libraryHero,
         basicDescription: realGame.short_description,
         description: realGame.detailed_description,
-        latestVersion: steamAppInfo.data[realGame.steam_appid].depots !== undefined ? steamAppInfo?.data[realGame.steam_appid].depots.branches!['public'].buildid! : '1.0'
+        latestVersion:
+          steamAppInfo.data[realGame.steam_appid].depots !== undefined
+            ? steamAppInfo?.data[realGame.steam_appid].depots.branches![
+                "public"
+              ].buildid!
+            : "1.0",
       });
       return;
     }
-    event.fail('Game not found');
+    event.fail("Game not found");
   });
 });
 
-function extractApps(items: { name: string; logo: string }[]): BasicLibraryInfo[] {
-  return items.map(item => {
-    const match = item.logo.match(/apps\/(\d+)/);
-    if (!match) {
-      return null;
-    }
-    const appID = parseInt(match[1]);
-    return {
-      name: item.name,
-      capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${appID}/library_600x900_2x.jpg`,
-      appID: appID,
-      storefront: 'steam'
-    }
-  }).filter(app => app !== null);
+function extractApps(
+  items: { name: string; logo: string }[],
+): BasicLibraryInfo[] {
+  return items
+    .map((item) => {
+      const match = item.logo.match(/apps\/(\d+)/);
+      if (!match) {
+        return null;
+      }
+      const appID = parseInt(match[1]);
+      return {
+        name: item.name,
+        capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${appID}/library_600x900_2x.jpg`,
+        appID: appID,
+        storefront: "steam",
+      };
+    })
+    .filter((app) => app !== null);
 }
 
 type SteamResult = {
   desc: string;
   items: {
     name: string;
-    logo: string
-  }[]
-}
+    logo: string;
+  }[];
+};
 
 type CatalogSection = {
   key: string;
   name: string;
   description: string;
   listings: BasicLibraryInfo[];
-}
+};
 
-async function fetchSteamCatalogByTag(tag: number, key: string, name: string, description: string): Promise<CatalogSection> {
+async function fetchSteamCatalogByTag(
+  tag: number,
+  key: string,
+  name: string,
+  description: string,
+): Promise<CatalogSection> {
   // Check cache first
-  const cachedSection = getCachedData<CatalogSection>(CATALOG_CACHE_FILE, key, CATALOG_CACHE_DURATION_MS);
+  const cachedSection = getCachedData<CatalogSection>(
+    CATALOG_CACHE_FILE,
+    key,
+    CATALOG_CACHE_DURATION_MS,
+  );
   if (cachedSection) {
     console.log(`Using cached catalog section: ${key}`);
     return cachedSection;
@@ -983,27 +1163,36 @@ async function fetchSteamCatalogByTag(tag: number, key: string, name: string, de
     `https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&tags=${tag}`,
     {
       headers: {
-        'User-Agent': 'OGI Steam-Integration/1.0.0'
-      }
-    }
+        "User-Agent": "OGI Steam-Integration/1.0.0",
+      },
+    },
   );
   const section: CatalogSection = {
     key,
     name,
     description,
-    listings: extractApps(response.data.items)
+    listings: extractApps(response.data.items),
   };
-  
+
   // Cache the result
   setCachedData(CATALOG_CACHE_FILE, key, section);
   console.log(`Cached catalog section: ${key}`);
-  
+
   return section;
 }
 
-async function fetchSteamCatalogByCategory(category: number, key: string, name: string, description: string): Promise<CatalogSection> {
+async function fetchSteamCatalogByCategory(
+  category: number,
+  key: string,
+  name: string,
+  description: string,
+): Promise<CatalogSection> {
   // Check cache first
-  const cachedSection = getCachedData<CatalogSection>(CATALOG_CACHE_FILE, key, CATALOG_CACHE_DURATION_MS);
+  const cachedSection = getCachedData<CatalogSection>(
+    CATALOG_CACHE_FILE,
+    key,
+    CATALOG_CACHE_DURATION_MS,
+  );
   if (cachedSection) {
     console.log(`Using cached catalog section: ${key}`);
     return cachedSection;
@@ -1013,27 +1202,36 @@ async function fetchSteamCatalogByCategory(category: number, key: string, name: 
     `https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&category2=${category}`,
     {
       headers: {
-        'User-Agent': 'OGI Steam-Integration/1.0.0'
-      }
-    }
+        "User-Agent": "OGI Steam-Integration/1.0.0",
+      },
+    },
   );
   const section: CatalogSection = {
     key,
     name,
     description,
-    listings: extractApps(response.data.items)
+    listings: extractApps(response.data.items),
   };
-  
+
   // Cache the result
   setCachedData(CATALOG_CACHE_FILE, key, section);
   console.log(`Cached catalog section: ${key}`);
-  
+
   return section;
 }
 
-async function fetchSteamCatalog(filters: string, key: string, name: string, description: string): Promise<CatalogSection> {
+async function fetchSteamCatalog(
+  filters: string,
+  key: string,
+  name: string,
+  description: string,
+): Promise<CatalogSection> {
   // Check cache first
-  const cachedSection = getCachedData<CatalogSection>(CATALOG_CACHE_FILE, key, CATALOG_CACHE_DURATION_MS);
+  const cachedSection = getCachedData<CatalogSection>(
+    CATALOG_CACHE_FILE,
+    key,
+    CATALOG_CACHE_DURATION_MS,
+  );
   if (cachedSection) {
     console.log(`Using cached catalog section: ${key}`);
     return cachedSection;
@@ -1043,61 +1241,104 @@ async function fetchSteamCatalog(filters: string, key: string, name: string, des
     `https://store.steampowered.com/search/results/?filter=globaltopsellers&ignore_preferences=1&json=1&hidef2p=1&category1=998&${filters}`,
     {
       headers: {
-        'User-Agent': 'OGI Steam-Integration/1.0.0'
-      }
-    }
+        "User-Agent": "OGI Steam-Integration/1.0.0",
+      },
+    },
   );
   const section: CatalogSection = {
     key,
     name,
     description,
-    listings: extractApps(response.data.items)
+    listings: extractApps(response.data.items),
   };
-  
+
   // Cache the result
   setCachedData(CATALOG_CACHE_FILE, key, section);
   console.log(`Cached catalog section: ${key}`);
-  
+
   return section;
 }
 
-addon.on('catalog', (event) => {
+addon.on("catalog", (event) => {
   event.defer(async () => {
     const promises = await Promise.allSettled([
       // -- Top Sellers --
-      fetchSteamCatalog('', 'top-sellers', 'Top Sellers', 'The best selling games on Steam'),
+      fetchSteamCatalog(
+        "",
+        "top-sellers",
+        "Top Sellers",
+        "The best selling games on Steam",
+      ),
       // -- Roguelike --
-      fetchSteamCatalogByTag(1716, 'roguelike', 'Roguelike', 'Top Roguelike games on Steam'),
+      fetchSteamCatalogByTag(
+        1716,
+        "roguelike",
+        "Roguelike",
+        "Top Roguelike games on Steam",
+      ),
       // -- JRPGs --
-      fetchSteamCatalogByTag(4434, 'jrpg', 'JRPG', 'Top JRPG games on Steam'),
+      fetchSteamCatalogByTag(4434, "jrpg", "JRPG", "Top JRPG games on Steam"),
       // -- Multiplayer --
-      fetchSteamCatalogByCategory(1, 'multiplayer', 'Multiplayer', 'Top multiplayer games on Steam'),
+      fetchSteamCatalogByCategory(
+        1,
+        "multiplayer",
+        "Multiplayer",
+        "Top multiplayer games on Steam",
+      ),
       // -- Co-op --
-      fetchSteamCatalogByCategory(9, 'coop', 'Co-op', 'Top co-op games on Steam'),
+      fetchSteamCatalogByCategory(
+        9,
+        "coop",
+        "Co-op",
+        "Top co-op games on Steam",
+      ),
       // -- Single-player --
-      fetchSteamCatalogByCategory(2, 'singleplayer', 'Single-player', 'Top single-player games on Steam'),
+      fetchSteamCatalogByCategory(
+        2,
+        "singleplayer",
+        "Single-player",
+        "Top single-player games on Steam",
+      ),
       // -- VR Support --
-      fetchSteamCatalogByCategory(31, 'vr', 'VR Support', 'Top VR games on Steam'),
+      fetchSteamCatalogByCategory(
+        31,
+        "vr",
+        "VR Support",
+        "Top VR games on Steam",
+      ),
       // -- Full Controller Support --
-      fetchSteamCatalogByCategory(28, 'controller', 'Full Controller Support', 'Top games with full controller support'),
+      fetchSteamCatalogByCategory(
+        28,
+        "controller",
+        "Full Controller Support",
+        "Top games with full controller support",
+      ),
       // -- PvP --
-      fetchSteamCatalogByCategory(49, 'pvp', 'PvP', 'Top PvP games on Steam'),
+      fetchSteamCatalogByCategory(49, "pvp", "PvP", "Top PvP games on Steam"),
       // -- Remote Play Together --
-      fetchSteamCatalogByCategory(44, 'remote-play', 'Remote Play Together', 'Games that support Remote Play Together'),
+      fetchSteamCatalogByCategory(
+        44,
+        "remote-play",
+        "Remote Play Together",
+        "Games that support Remote Play Together",
+      ),
     ]);
 
     // Filter out rejected promises and extract successful results
     const sections = promises
-      .filter((promise): promise is PromiseFulfilledResult<CatalogSection> => promise.status === 'fulfilled')
-      .map(promise => promise.value);
+      .filter(
+        (promise): promise is PromiseFulfilledResult<CatalogSection> =>
+          promise.status === "fulfilled",
+      )
+      .map((promise) => promise.value);
 
     // Build catalog results
-    const catalogResults: Parameters<typeof event.resolve>[0]['sections'] = {};
+    const catalogResults: Parameters<typeof event.resolve>[0]["sections"] = {};
     for (const section of sections) {
       catalogResults[section.key] = {
         name: section.name,
         description: section.description,
-        listings: section.listings
+        listings: section.listings,
       };
     }
 
@@ -1118,52 +1359,72 @@ addon.on('catalog', (event) => {
         carouselItems[listing.appID] = {
           ...listing,
           description: realGame.short_description,
-          carouselImage: baseAssetUrl + (steamAppInfo.data[listing.appID].common.header_image!['english']! ?? listing.capsuleImage),
-          fullBannerImage: baseAssetUrl + (steamAppInfo.data[listing.appID].common.header_image!['english']! ?? listing.capsuleImage)
+          carouselImage:
+            baseAssetUrl +
+            (steamAppInfo.data[listing.appID].common.header_image![
+              "english"
+            ]! ?? listing.capsuleImage),
+          fullBannerImage:
+            baseAssetUrl +
+            (steamAppInfo.data[listing.appID].common.header_image![
+              "english"
+            ]! ?? listing.capsuleImage),
         };
       }
     }
 
     event.resolve({
       sections: catalogResults,
-      carousel: carouselItems
+      carousel: carouselItems,
     });
   });
 });
 
 let req = 0;
-addon.on('check-for-updates', ({ appID, storefront, currentVersion }, event) => {
-  req++;
-  console.log('Checking for updates for ' + appID + ' (' + req + ')');
-  event.defer(async () => {
-    // Check cache first - return immediately if cached
-    // handle resolving 1.0 file versions with auto resolution
-    if (currentVersion === '1.0' || currentVersion === '1.0.0') {
-      // assume that the current version is the latest version as stored by the resolver
-      currentVersion = await resolve10FileVersion(appID);
-      console.log('Resolved 1.0 file version for ' + appID + ' to ' + currentVersion + ' (' + req + ')');
-    }
+addon.on(
+  "check-for-updates",
+  ({ appID, storefront, currentVersion }, event) => {
+    req++;
+    console.log("Checking for updates for " + appID + " (" + req + ")");
+    event.defer(async () => {
+      // Check cache first - return immediately if cached
+      // handle resolving 1.0 file versions with auto resolution
+      if (currentVersion === "1.0" || currentVersion === "1.0.0") {
+        // assume that the current version is the latest version as stored by the resolver
+        currentVersion = await resolve10FileVersion(appID);
+        console.log(
+          "Resolved 1.0 file version for " +
+            appID +
+            " to " +
+            currentVersion +
+            " (" +
+            req +
+            ")",
+        );
+      }
 
-    // if the update is already cached, return the result immediately
-    const cachedUpdate = getCachedUpdate(appID);
-    if (cachedUpdate) {
-      event.resolve({
-        version: cachedUpdate.version,
-        available: cachedUpdate.version !== currentVersion
-      });
-      return;
-    }
+      // if the update is already cached, return the result immediately
+      const cachedUpdate = getCachedUpdate(appID);
+      if (cachedUpdate) {
+        event.resolve({
+          version: cachedUpdate.version,
+          available: cachedUpdate.version !== currentVersion,
+        });
+        return;
+      }
 
-    await new Promise(resolve => setTimeout(resolve, UPDATE_COOLDOWN_MS * req));
+      await new Promise((resolve) =>
+        setTimeout(resolve, UPDATE_COOLDOWN_MS * req),
+      );
 
-    
-    // Cache miss - queue the request for API call and return the result
-    const result = await queueUpdateCheck(appID, currentVersion);
-    event.resolve(result);
-  });
-});
+      // Cache miss - queue the request for API call and return the result
+      const result = await queueUpdateCheck(appID, currentVersion);
+      event.resolve(result);
+    });
+  },
+);
 
-addon.on('disconnect', () => {
+addon.on("disconnect", () => {
   // Clean up the cache cleanup interval
   if (cacheCleanupInterval) {
     clearInterval(cacheCleanupInterval);
@@ -1175,12 +1436,17 @@ addon.on('disconnect', () => {
 // 1.0 file version auto resolution
 type Resolved10FileVersions = {
   [appID: number]: string;
-}
+};
 
-const RESOLVED_10_FILE_VERSIONS_FILE = join(CACHE_DIR, 'resolved10FileVersions.json');
+const RESOLVED_10_FILE_VERSIONS_FILE = join(
+  CACHE_DIR,
+  "resolved10FileVersions.json",
+);
 let resolved10FileVersions: Resolved10FileVersions = {};
 if (fs.existsSync(RESOLVED_10_FILE_VERSIONS_FILE)) {
-  resolved10FileVersions = JSON.parse(fs.readFileSync(RESOLVED_10_FILE_VERSIONS_FILE, 'utf-8'));
+  resolved10FileVersions = JSON.parse(
+    fs.readFileSync(RESOLVED_10_FILE_VERSIONS_FILE, "utf-8"),
+  );
 }
 async function resolve10FileVersion(appID: number) {
   if (resolved10FileVersions[appID]) {
@@ -1188,15 +1454,20 @@ async function resolve10FileVersion(appID: number) {
   }
   const steamAppInfo = await getSteamAppInfo(appID);
   if (!steamAppInfo) {
-    return '1.0';
+    return "1.0";
   }
 
   // get the current version and assume that our version is the latest as to prevent issues where all games are outdated.
   // this functionality will be removed in the future.
-  const version = steamAppInfo.data[appID].common.public_only === undefined
-    ? steamAppInfo?.data[appID].depots.branches!['public'].buildid! 
-    : '1.0';
+  const version =
+    steamAppInfo.data[appID].common.public_only === undefined
+      ? steamAppInfo?.data[appID].depots.branches!["public"].buildid!
+      : "1.0";
   resolved10FileVersions[appID] = version;
-  fs.writeFileSync(RESOLVED_10_FILE_VERSIONS_FILE, JSON.stringify(resolved10FileVersions, null, 2));
+  fs.writeFileSync(
+    RESOLVED_10_FILE_VERSIONS_FILE,
+    JSON.stringify(resolved10FileVersions, null, 2),
+  );
   return version;
 }
+
