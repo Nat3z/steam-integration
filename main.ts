@@ -883,19 +883,17 @@ addon.onTask("forceNewUpdate", async (task, data) => {
 });
 
 addon.on("search", ({ storefront, appID, for: forType }, event) => {
-  event.defer(async () => {
-    if (forType !== "update") {
-      event.resolve([]);
-      return;
-    }
+  if (forType !== "task") {
+    event.resolve([]);
+    return;
+  }
 
-    // return a task that forces a check for update
-    event.resolve([{
-      taskName: "forceNewUpdate",
-      name: "Force New Update",
-      downloadType: "task" as const,
-    }]);
-  })
+  // return a task that forces a check for update
+  event.resolve([{
+    taskName: "forceNewUpdate",
+    name: "Force New Update",
+    downloadType: "task" as const,
+  }]);
 })
 
 addon.on("configure", (config) =>
