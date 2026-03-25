@@ -855,6 +855,49 @@ async function getRealGame(
   }
 }
 
+addon.onTask("forceNewUpdate", async (task, data) => {
+  // check os version to know where ogi is located
+  const os = process.platform;
+  let ogiPath = '';
+  if (os === "win32") {
+    ogiPath = join(process.env.LOCALAPPDATA!, "Programs", "ogi-updater", "update");
+  } else if (os === "linux") {
+    ogiPath = join(process.env.HOME!, ".local", "share", "OpenGameInstaller");
+  }
+
+  if (ogiPath === '') {
+    task.fail("Failed to find OGI updater");
+    return;
+  }
+
+  const libraryPath = join(ogiPath, "library", data.libraryInfo.appID + ".json");
+  if (!fs.existsSync(libraryPath)) {
+    task.fail("Library file not found");
+    return;
+  }
+  const library = JSON.parse(fs.readFileSync(libraryPath, "utf8"));
+  // set the library version to a known won't work version
+  library.version = "9999.9999.9999";
+  fs.writeFileSync(libraryPath, JSON.stringify(library, null, 2));
+  task.complete();
+});
+
+addon.on("search", ({ storefront, appID, for: forType }, event) => {
+  event.defer(async () => {
+    if (forType !== "update") {
+      event.resolve([]);
+      return;
+    }
+
+    // return a task that forces a check for update
+    event.resolve([{
+      taskName: "forceNewUpdate",
+      name: "Force New Update",
+      downloadType: "task" as const,
+    }]);
+  })
+})
+
 addon.on("configure", (config) =>
   config
     .addNumberOption((option) =>
