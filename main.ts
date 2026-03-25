@@ -648,7 +648,7 @@ async function getSteamAppInfo(
       }
     }
     const response = await axios<SteamAppInfoResponse>({
-      url: `https://steamcmdapi.nat3z.com/v1/info/${appID}`,
+      url: `https://api.steamcmd.net/v1/info/${appID}`,
       headers: {
         "User-Agent": "OGI Steam-Integration/1.0.0",
       },
