@@ -30,7 +30,12 @@ const STEAM_APP_INFO_CACHE_FILE = join(CACHE_DIR, "steam-app-info.json");
 const REAL_GAME_CACHE_FILE = join(CACHE_DIR, "real-game.json");
 const CATALOG_CACHE_FILE = join(CACHE_DIR, "catalog.json");
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day in milliseconds
+/** Per-app Steam update checks: short TTL so new builds are noticed without waiting a day. */
+const UPDATE_CACHE_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 const CATALOG_CACHE_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours in milliseconds
+
+const RESTART_APP_FOR_FRESH_DATA =
+  "Fully quit and restart OpenGameInstaller to re-check for any game updates or new catalog data.";
 let UPDATE_COOLDOWN_MS = 1500; // 1.5 seconds cooldown per game
 
 // Ensure cache directory exists
@@ -198,7 +203,7 @@ function cleanupUpdateCache(): number {
     const cleanedCache: UpdateCache = {};
     for (const [appID, entry] of Object.entries(cache)) {
       const age = now - entry.timestamp;
-      if (age < CACHE_DURATION_MS) {
+      if (age < UPDATE_CACHE_DURATION_MS) {
         cleanedCache[appID] = entry;
       } else {
         removedCount++;
@@ -228,7 +233,7 @@ function cleanupAllCaches(): void {
 
   let totalRemoved = 0;
 
-  // Clean up update cache (24 hour expiration)
+  // Clean up update cache (short TTL — see UPDATE_CACHE_DURATION_MS)
   totalRemoved += cleanupUpdateCache();
 
   // Clean up Steam app info cache (24 hour expiration)
@@ -264,7 +269,7 @@ function getCachedUpdate(appID: number): UpdateCacheEntry | null {
   }
 
   const age = Date.now() - entry.timestamp;
-  if (age >= CACHE_DURATION_MS) {
+  if (age >= UPDATE_CACHE_DURATION_MS) {
     // Cache expired, remove it
     delete cache[appID.toString()];
     writeUpdateCache(cache);
@@ -272,6 +277,24 @@ function getCachedUpdate(appID: number): UpdateCacheEntry | null {
   }
 
   return entry;
+}
+
+function removeCachedUpdate(appID: number): void {
+  const cache = readUpdateCache();
+  if (!cache[appID.toString()]) {
+    return;
+  }
+  delete cache[appID.toString()];
+  writeUpdateCache(cache);
+}
+
+function removeCachedGenericKey<T>(cacheFile: string, key: string): void {
+  const cache = readGenericCache<T>(cacheFile);
+  if (!cache[key]) {
+    return;
+  }
+  delete cache[key];
+  writeGenericCache(cacheFile, cache);
 }
 
 function setCachedUpdate(appID: number, version: string): void {
@@ -879,6 +902,16 @@ addon.onTask("forceNewUpdate", async (task, data) => {
   // set the library version to a known won't work version
   library.version = "9999.9999.9999";
   fs.writeFileSync(libraryPath, JSON.stringify(library, null, 2));
+
+  const steamAppID = data.libraryInfo.appID;
+  task.log(`Clearing cached update and store data for app ${steamAppID}`);
+  clearCachesForSteamApp(steamAppID);
+
+  await task.askForInput(
+    "Force new update",
+    `Library entry was bumped and caches for this game were cleared. ${RESTART_APP_FOR_FRESH_DATA}`,
+    new ConfigurationBuilder(),
+  );
   task.complete();
 });
 
@@ -958,7 +991,7 @@ addon.onTask("checkForUpdates", async (task) => {
   fs.writeFileSync(UPDATE_CACHE_FILE, JSON.stringify({}, null, 2));
   await task.askForInput(
     "All Cached Updates Cleared",
-    "All checks for updates have been cleared. To re-run a check for updates, restart the addon server by going to Settings > General > Restart Addon Server.",
+    `All checks for updates have been cleared. ${RESTART_APP_FOR_FRESH_DATA}`,
     new ConfigurationBuilder(),
   );
   task.complete();
@@ -992,7 +1025,7 @@ addon.onTask("clearAllCaches", async (task) => {
 
   await task.askForInput(
     "All Caches Cleared",
-    "All cached data has been cleared. To see fresh data, restart the addon server by going to Settings > General > Restart Addon Server.",
+    `All cached data has been cleared. ${RESTART_APP_FOR_FRESH_DATA}`,
     new ConfigurationBuilder(),
   );
   task.complete();
@@ -1489,6 +1522,24 @@ if (fs.existsSync(RESOLVED_10_FILE_VERSIONS_FILE)) {
     fs.readFileSync(RESOLVED_10_FILE_VERSIONS_FILE, "utf-8"),
   );
 }
+
+function clearCachesForSteamApp(appID: number): void {
+  removeCachedUpdate(appID);
+  removeCachedGenericKey<SteamAppInfoResponse>(
+    STEAM_APP_INFO_CACHE_FILE,
+    appID.toString(),
+  );
+  removeCachedGenericKey<GameData>(REAL_GAME_CACHE_FILE, appID.toString());
+  if (resolved10FileVersions[appID]) {
+    delete resolved10FileVersions[appID];
+    fs.writeFileSync(
+      RESOLVED_10_FILE_VERSIONS_FILE,
+      JSON.stringify(resolved10FileVersions, null, 2),
+    );
+  }
+  lastApiCallTime.delete(appID);
+}
+
 async function resolve10FileVersion(appID: number) {
   if (resolved10FileVersions[appID]) {
     return resolved10FileVersions[appID];
