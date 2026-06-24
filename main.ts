@@ -881,19 +881,28 @@ async function getRealGame(
 addon.onTask("forceNewUpdate", async (task, data) => {
   // check os version to know where ogi is located
   const os = process.platform;
-  let ogiPath = '';
+  let ogiPath = "";
   if (os === "win32") {
-    ogiPath = join(process.env.LOCALAPPDATA!, "Programs", "ogi-updater", "update");
+    ogiPath = join(
+      process.env.LOCALAPPDATA!,
+      "Programs",
+      "ogi-updater",
+      "update",
+    );
   } else if (os === "linux") {
     ogiPath = join(process.env.HOME!, ".local", "share", "OpenGameInstaller");
   }
 
-  if (ogiPath === '') {
+  if (ogiPath === "") {
     task.fail("Failed to find OGI updater");
     return;
   }
 
-  const libraryPath = join(ogiPath, "library", data.libraryInfo.appID + ".json");
+  const libraryPath = join(
+    ogiPath,
+    "library",
+    data.libraryInfo.appID + ".json",
+  );
   if (!fs.existsSync(libraryPath)) {
     task.fail("Library file not found");
     return;
@@ -922,12 +931,14 @@ addon.on("search", ({ storefront, appID, for: forType }, event) => {
   }
 
   // return a task that forces a check for update
-  event.resolve([{
-    taskName: "forceNewUpdate",
-    name: "Force New Update",
-    downloadType: "task" as const,
-  }]);
-})
+  event.resolve([
+    {
+      taskName: "forceNewUpdate",
+      name: "Force New Update",
+      downloadType: "task" as const,
+    },
+  ]);
+});
 
 addon.on("configure", (config) =>
   config
@@ -1051,6 +1062,20 @@ let cacheCleanupInterval: NodeJS.Timeout | null = null;
 
 addon.on("connect", async () => {
   console.log("Steam integration connected");
+
+  // run a network check
+  void new Promise(async (res, rej) => {
+    axios.get("https://google.com", { timeout: 2000 }).catch(rej).then(res);
+  }).catch(() => {
+    console.error("failed network check");
+    addon.notify({
+      id: "steam-integration-failed",
+      message: "steam-integration: Network check failed, stopping addon.",
+      type: "error",
+    });
+    process.exit(1);
+  });
+
   UPDATE_COOLDOWN_MS = addon.config.getNumberValue("update-cooldown") * 1000;
   console.log("Update cooldown set to " + UPDATE_COOLDOWN_MS + "ms");
 
@@ -1562,4 +1587,3 @@ async function resolve10FileVersion(appID: number) {
   );
   return version;
 }
-
