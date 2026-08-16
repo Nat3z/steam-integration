@@ -207,6 +207,7 @@ export type SteamImageSet = {
 
 export type SteamHeroImage = {
 	image?: Record<string, string>;
+	image2x?: Record<string, string>;
 };
 
 export type SteamLogoImageSet = {
