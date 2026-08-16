@@ -1,6 +1,6 @@
 {
   "author": "OGI Team",
-  "icon": "icon.png",
+  "icon": "favicon.png",
   "scripts": {
     "preSetup": "bun install --frozen-lockfile",
     "run": "bun run main.ts"
