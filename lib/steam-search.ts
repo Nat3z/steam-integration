@@ -1,5 +1,6 @@
 import axios from "axios";
 import type { BasicLibraryInfo } from "ogi-addon";
+import { fetchSteamLibraryCapsules } from "./steam-assets";
 
 const STEAM_USER_AGENT = "OGI Steam-Integration/1.0.0";
 const HTML_ENTITIES: Readonly<Record<string, string>> = {
@@ -89,6 +90,21 @@ function toLibraryInfo({
   };
 }
 
+async function withLibraryCapsules(
+  results: BasicLibraryInfo[],
+): Promise<BasicLibraryInfo[]> {
+  const capsules = await fetchSteamLibraryCapsules(
+    results.map((result): number => result.appID),
+  );
+
+  return results.map(
+    (result): BasicLibraryInfo => ({
+      ...result,
+      capsuleImage: capsules.get(result.appID) ?? result.capsuleImage,
+    }),
+  );
+}
+
 async function searchSteamStore(query: string): Promise<BasicLibraryInfo[]> {
   const response = await axios.get<SteamSearchResponse>(
     "https://store.steampowered.com/search/results/",
@@ -145,11 +161,11 @@ export async function searchSteamLibrary(
     );
     const suggestions = parseSteamSuggestions(response.data);
     if (suggestions.length > 0) {
-      return suggestions.map(toLibraryInfo);
+      return withLibraryCapsules(suggestions.map(toLibraryInfo));
     }
   } catch (error) {
     console.warn("Steam autocomplete search failed; using store search", error);
   }
 
-  return searchSteamStore(query);
+  return withLibraryCapsules(await searchSteamStore(query));
 }

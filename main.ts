@@ -11,7 +11,10 @@ import {
   type SteamAppInfo,
   type SteamAppInfoResponse,
 } from "./lib/types";
-import { resolveSteamAssets } from "./lib/steam-assets";
+import {
+  fetchSteamLibraryCapsules,
+  resolveSteamAssets,
+} from "./lib/steam-assets";
 import { searchSteamLibrary } from "./lib/steam-search";
 
 const addon = new OGIAddon({
@@ -1017,6 +1020,21 @@ addon.on("catalog", (event) => {
           promise.status === "fulfilled",
       )
       .map((promise) => promise.value);
+
+    const libraryCapsules = await fetchSteamLibraryCapsules(
+      sections.flatMap((section): number[] =>
+        section.listings.map((listing): number => listing.appID),
+      ),
+    );
+    for (const section of sections) {
+      section.listings = section.listings.map(
+        (listing): BasicLibraryInfo => ({
+          ...listing,
+          capsuleImage:
+            libraryCapsules.get(listing.appID) ?? listing.capsuleImage,
+        }),
+      );
+    }
 
     // Build catalog results
     const catalogResults: Parameters<typeof event.resolve>[0]["sections"] = {};
