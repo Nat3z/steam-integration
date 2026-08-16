@@ -1,5 +1,6 @@
 import axios from "axios";
 import type { BasicLibraryInfo } from "ogi-addon";
+import { fetchSteamLibraryCapsules } from "./steam-assets";
 
 const STEAM_USER_AGENT = "OGI Steam-Integration/1.0.0";
 const HTML_ENTITIES: Readonly<Record<string, string>> = {
@@ -20,6 +21,7 @@ type SteamSearchResponse = {
 type SteamSuggestion = {
   appID: number;
   name: string;
+  capsuleImage: string;
 };
 
 function decodeSteamHtml(value: string): string {
@@ -49,28 +51,58 @@ function decodeSteamHtml(value: string): string {
     .trim();
 }
 
-function parseSteamSuggestions(html: string): SteamSuggestion[] {
+export function parseSteamSuggestions(html: string): SteamSuggestion[] {
   const suggestions: SteamSuggestion[] = [];
   const suggestionPattern =
-    /<a\b[^>]*data-ds-appid="(\d+)"[^>]*>[\s\S]*?<div\b[^>]*class="match_name[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
+    /<a\b[^>]*data-ds-appid="(\d+)"[^>]*>([\s\S]*?)<\/a>/gi;
 
   for (const match of html.matchAll(suggestionPattern)) {
+    const name = match[2].match(
+      /<div\b[^>]*class="match_name[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+    )?.[1];
+    const capsuleImage = match[2].match(
+      /<img\b[^>]*\bsrc=(?:"([^"]+)"|'([^']+)')/i,
+    );
+    if (!name || !capsuleImage) {
+      continue;
+    }
+
     suggestions.push({
       appID: Number.parseInt(match[1], 10),
-      name: decodeSteamHtml(match[2]),
+      name: decodeSteamHtml(name),
+      capsuleImage: decodeSteamHtml(capsuleImage[1] ?? capsuleImage[2]),
     });
   }
 
   return suggestions;
 }
 
-function toLibraryInfo({ appID, name }: SteamSuggestion): BasicLibraryInfo {
+function toLibraryInfo({
+  appID,
+  name,
+  capsuleImage,
+}: SteamSuggestion): BasicLibraryInfo {
   return {
     appID,
     name,
     storefront: "steam",
-    capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${appID}/header.jpg`,
+    capsuleImage,
   };
+}
+
+async function withLibraryCapsules(
+  results: BasicLibraryInfo[],
+): Promise<BasicLibraryInfo[]> {
+  const capsules = await fetchSteamLibraryCapsules(
+    results.map((result): number => result.appID),
+  );
+
+  return results.map(
+    (result): BasicLibraryInfo => ({
+      ...result,
+      capsuleImage: capsules.get(result.appID) ?? result.capsuleImage,
+    }),
+  );
 }
 
 async function searchSteamStore(query: string): Promise<BasicLibraryInfo[]> {
@@ -98,6 +130,7 @@ async function searchSteamStore(query: string): Promise<BasicLibraryInfo[]> {
       toLibraryInfo({
         appID: Number.parseInt(match[1], 10),
         name: decodeSteamHtml(item.name),
+        capsuleImage: item.logo,
       }),
     ];
   });
@@ -128,11 +161,11 @@ export async function searchSteamLibrary(
     );
     const suggestions = parseSteamSuggestions(response.data);
     if (suggestions.length > 0) {
-      return suggestions.map(toLibraryInfo);
+      return withLibraryCapsules(suggestions.map(toLibraryInfo));
     }
   } catch (error) {
     console.warn("Steam autocomplete search failed; using store search", error);
   }
 
-  return searchSteamStore(query);
+  return withLibraryCapsules(await searchSteamStore(query));
 }
