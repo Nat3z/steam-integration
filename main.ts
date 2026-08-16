@@ -11,6 +11,7 @@ import {
   type SteamAppInfo,
   type SteamAppInfoResponse,
 } from "./lib/types";
+import { resolveSteamAssets } from "./lib/steam-assets";
 import { searchSteamLibrary } from "./lib/steam-search";
 
 const addon = new OGIAddon({
@@ -23,8 +24,6 @@ const addon = new OGIAddon({
   storefronts: ["steam"],
 });
 
-const BASE_ASSET_URL = (appID: number) =>
-  `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appID}/`;
 const CACHE_DIR = join(__dirname, ".cache");
 const UPDATE_CACHE_FILE = join(CACHE_DIR, "update-cache.json");
 const STEAM_APP_INFO_CACHE_FILE = join(CACHE_DIR, "steam-app-info.json");
@@ -34,6 +33,7 @@ const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 1 day in milliseconds
 /** Per-app Steam update checks: short TTL so new builds are noticed without waiting a day. */
 const UPDATE_CACHE_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 const CATALOG_CACHE_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours in milliseconds
+const CATALOG_CACHE_VERSION = "assets-v2";
 
 const RESTART_APP_FOR_FRESH_DATA =
   "Fully quit and restart OpenGameInstaller to re-check for any game updates or new catalog data.";
@@ -747,24 +747,17 @@ addon.on("game-details", ({ appID, storefront }, event) => {
         return;
       }
 
-      const assets =
-        steamAppInfo.data[realGame.steam_appid].common.library_assets_full;
-      // Helper function: get image by language, defaulting to English, else first available
-      const baseAssetUrl = BASE_ASSET_URL(realGame.steam_appid);
-      function getAssetImage(assetData?: { image?: Record<string, string> }) {
-        if (!assetData?.image) return undefined;
-        return (
-          baseAssetUrl +
-          (assetData.image["english"] ??
-            assetData.image[Object.keys(assetData.image)[0]])
-        );
-      }
-      const libraryHero =
-        getAssetImage(assets?.library_hero) ??
-        baseAssetUrl + "library_hero.jpg";
-      const libraryCapsule =
-        getAssetImage(assets?.library_capsule) ??
-        baseAssetUrl + "library_600x900_2x.jpg";
+      const steamAssets = resolveSteamAssets(
+        realGame.steam_appid,
+        steamAppInfo.data[realGame.steam_appid].common,
+      );
+      const capsuleImage =
+        steamAssets.capsuleImage ??
+        realGame.capsule_imagev5 ??
+        realGame.capsule_image ??
+        realGame.header_image;
+      const headerImage = steamAssets.headerImage ?? realGame.header_image;
+      const coverImage = steamAssets.heroImage ?? headerImage;
       console.log(
         appID,
         "is public only?",
@@ -776,12 +769,12 @@ addon.on("game-details", ({ appID, storefront }, event) => {
       event.resolve({
         appID: realGame.steam_appid,
         name: realGame.name,
-        capsuleImage: libraryCapsule,
-        headerImage: libraryHero,
+        capsuleImage,
+        headerImage,
         publishers: realGame.publishers,
         developers: realGame.developers,
         releaseDate: realGame.release_date.date,
-        coverImage: libraryHero,
+        coverImage,
         basicDescription: realGame.short_description,
         description: realGame.detailed_description,
         latestVersion:
@@ -809,7 +802,7 @@ function extractApps(
       const appID = parseInt(match[1]);
       return {
         name: item.name,
-        capsuleImage: `https://cdn.akamai.steamstatic.com/steam/apps/${appID}/library_600x900_2x.jpg`,
+        capsuleImage: item.logo,
         appID: appID,
         storefront: "steam",
       };
@@ -838,10 +831,11 @@ async function fetchSteamCatalogByTag(
   name: string,
   description: string,
 ): Promise<CatalogSection> {
+  const cacheKey = `${CATALOG_CACHE_VERSION}:${key}`;
   // Check cache first
   const cachedSection = getCachedData<CatalogSection>(
     CATALOG_CACHE_FILE,
-    key,
+    cacheKey,
     CATALOG_CACHE_DURATION_MS,
   );
   if (cachedSection) {
@@ -865,7 +859,7 @@ async function fetchSteamCatalogByTag(
   };
 
   // Cache the result
-  setCachedData(CATALOG_CACHE_FILE, key, section);
+  setCachedData(CATALOG_CACHE_FILE, cacheKey, section);
   console.log(`Cached catalog section: ${key}`);
 
   return section;
@@ -877,10 +871,11 @@ async function fetchSteamCatalogByCategory(
   name: string,
   description: string,
 ): Promise<CatalogSection> {
+  const cacheKey = `${CATALOG_CACHE_VERSION}:${key}`;
   // Check cache first
   const cachedSection = getCachedData<CatalogSection>(
     CATALOG_CACHE_FILE,
-    key,
+    cacheKey,
     CATALOG_CACHE_DURATION_MS,
   );
   if (cachedSection) {
@@ -904,7 +899,7 @@ async function fetchSteamCatalogByCategory(
   };
 
   // Cache the result
-  setCachedData(CATALOG_CACHE_FILE, key, section);
+  setCachedData(CATALOG_CACHE_FILE, cacheKey, section);
   console.log(`Cached catalog section: ${key}`);
 
   return section;
@@ -916,10 +911,11 @@ async function fetchSteamCatalog(
   name: string,
   description: string,
 ): Promise<CatalogSection> {
+  const cacheKey = `${CATALOG_CACHE_VERSION}:${key}`;
   // Check cache first
   const cachedSection = getCachedData<CatalogSection>(
     CATALOG_CACHE_FILE,
-    key,
+    cacheKey,
     CATALOG_CACHE_DURATION_MS,
   );
   if (cachedSection) {
@@ -943,7 +939,7 @@ async function fetchSteamCatalog(
   };
 
   // Cache the result
-  setCachedData(CATALOG_CACHE_FILE, key, section);
+  setCachedData(CATALOG_CACHE_FILE, cacheKey, section);
   console.log(`Cached catalog section: ${key}`);
 
   return section;
@@ -1045,20 +1041,19 @@ addon.on("catalog", (event) => {
         if (!steamAppInfo || !steamAppInfo.data[listing.appID]) {
           continue;
         }
-        const baseAssetUrl = BASE_ASSET_URL(listing.appID);
+        const steamAssets = resolveSteamAssets(
+          listing.appID,
+          steamAppInfo.data[listing.appID].common,
+        );
+        const carouselImage =
+          steamAssets.headerImage ??
+          realGame.header_image ??
+          listing.capsuleImage;
         carouselItems[listing.appID] = {
           ...listing,
           description: realGame.short_description,
-          carouselImage:
-            baseAssetUrl +
-            (steamAppInfo.data[listing.appID].common.header_image![
-              "english"
-            ]! ?? listing.capsuleImage),
-          fullBannerImage:
-            baseAssetUrl +
-            (steamAppInfo.data[listing.appID].common.header_image![
-              "english"
-            ]! ?? listing.capsuleImage),
+          carouselImage,
+          fullBannerImage: steamAssets.heroImage ?? carouselImage,
         };
       }
     }
